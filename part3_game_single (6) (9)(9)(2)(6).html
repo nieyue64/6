@@ -30386,9 +30386,9 @@ window.TU;
             if (!game) return;
             const d = dtClamped > 0 ? dtClamped : dtMs > 0 ? dtMs : 16.67;
             try {
-              game._machines || game._indexMachines();
+              game._machines || ("function" == typeof game._indexMachines && game._indexMachines());
               "function" == typeof game._updatePressurePlates && game._updatePressurePlates();
-              game._pumpSim(d);
+              "function" == typeof game._pumpSim && game._pumpSim(d);
             } catch(e){console.warn('[Catch]',e);}
             try {
               const ts = CFG && CFG.TILE_SIZE ? CFG.TILE_SIZE : 16,
