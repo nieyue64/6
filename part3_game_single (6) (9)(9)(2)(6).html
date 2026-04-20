@@ -21338,15 +21338,19 @@ class Renderer {
    */
   _runPostFxPipeline(time, depth01, reducedMotion) {
     // Lazy-merge class-level stages from patches (registered before instance creation)
-    const pending = Renderer._pendingPostFxStages;
-    if (pending && pending.length) {
-      for (let i = 0; i < pending.length; i++) {
-        const s = pending[i];
-        if (!this._postFxPipeline.some(e => e.name === s.name)) {
-          this._postFxPipeline.push(s);
+    // Only runs once per instance (flag prevents per-frame overhead)
+    if (!this._postFxPendingMerged) {
+      const pending = Renderer._pendingPostFxStages;
+      if (pending && pending.length) {
+        for (let i = 0; i < pending.length; i++) {
+          const s = pending[i];
+          if (!this._postFxPipeline.some(e => e.name === s.name)) {
+            this._postFxPipeline.push(s);
+          }
         }
+        this._postFxPipelineSorted = false;
       }
-      this._postFxPipelineSorted = false;
+      this._postFxPendingMerged = true;
     }
     if (!this._postFxPipeline.length) return;
     if (!this._postFxPipelineSorted) {
@@ -29421,15 +29425,10 @@ window.TU;
           })();
         }
         // NEUTRALIZED: AudioManager.enabled is now set in constructor (merged natively)
-        if (AudioManager && AudioManager.prototype) AudioManager.prototype.__tuAudioVisPatch = !0;
-        if (false && AudioManager && AudioManager.prototype && !AudioManager.prototype.__tuAudioVisPatch) {
-          if (AudioManager.prototype.__tuAudioVisPatch = !0, "function" == typeof AudioManager.prototype.updateWeatherAmbience) {
-            const _ua = AudioManager.prototype.updateWeatherAmbience;
-            AudioManager.prototype.updateWeatherAmbience = function (dtMs, weather) {
-              return void 0 === this.enabled && (this.enabled = !0), _ua.call(this, dtMs, weather);
-            };
-          }
-          // Battery saver: suspend audio context when hidden
+        // Only the updateWeatherAmbience wrapper is skipped; battery saver is kept.
+        if (AudioManager && AudioManager.prototype) {
+          AudioManager.prototype.__tuAudioVisPatch = !0;
+          // Battery saver: suspend audio context when hidden (KEPT - extracted from neutralized block)
           const suspendAudio = () => {
               const g = window.AppServices.get("game"),
                 audio = g && g.audio,
@@ -29448,19 +29447,10 @@ window.TU;
             };
           document.addEventListener("visibilitychange", () => {
             document.hidden ? suspendAudio() : resumeAudio();
-          }, {
-            passive: !0
-          });
-          window.addEventListener("pageshow", resumeAudio, {
-            passive: !0
-          });
-          window.addEventListener("focus", resumeAudio, {
-            passive: !0
-          });
-          // Pagehide: always suspend (best-effort)
-          window.addEventListener("pagehide", suspendAudio, {
-            passive: !0
-          });
+          }, { passive: !0 });
+          window.addEventListener("pageshow", resumeAudio, { passive: !0 });
+          window.addEventListener("focus", resumeAudio, { passive: !0 });
+          window.addEventListener("pagehide", suspendAudio, { passive: !0 });
         }
       }
     };
