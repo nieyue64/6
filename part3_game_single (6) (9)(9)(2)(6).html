@@ -30276,28 +30276,28 @@ window.TU;
             }
           });
           Game.prototype.__tuPlateGcOptInstalled = !0;
-          // Pump simulation (cross-region): moves water between PUMP_IN and PUMP_OUT on same wire network
-          window.GameEvents.on("game:update", (dtMs, game) => {
+          Game.prototype.__tuPumpGcOptInstalled = !0;
+          Game.prototype._pumpSim = function(dtMs) {
             const world = window.AppServices.get("world");
             if (!world || !world.tiles) return;
-            const m = game._machines;
+            const m = this._machines;
             if (!m || !m.pumpsIn || !m.pumpsOut) return;
             const pumpsIn = m.pumpsIn,
               totalIn = 0 | pumpsIn.length;
             if (!(totalIn && 0 | m.pumpsOut.length)) return;
-            if (game._pumpAcc = (game._pumpAcc || 0) + (dtMs || 0), 220 > game._pumpAcc) return;
-            game._pumpAcc = 0;
+            if (this._pumpAcc = (this._pumpAcc || 0) + (dtMs || 0), 220 > this._pumpAcc) return;
+            this._pumpAcc = 0;
             const w = 0 | world.w,
               h = 0 | world.h,
               tiles = world.tiles;
-            game._pumpVisited && game._pumpVisited.length === w * h || (game._pumpVisited = new Uint32Array(w * h), game._pumpStamp = 1);
-            const vis = game._pumpVisited;
-            let stamp = game._pumpStamp >>> 0 || 1;
-            const nextStamp = () => (stamp = stamp + 1 >>> 0, 0 === stamp && (vis.fill(0), stamp = 1), game._pumpStamp = stamp, stamp),
+            this._pumpVisited && this._pumpVisited.length === w * h || (this._pumpVisited = new Uint32Array(w * h), this._pumpStamp = 1);
+            const vis = this._pumpVisited;
+            let stamp = this._pumpStamp >>> 0 || 1;
+            const nextStamp = () => (stamp = stamp + 1 >>> 0, 0 === stamp && (vis.fill(0), stamp = 1), this._pumpStamp = stamp, stamp),
               isConductor = id => (id => id === IDS.WIRE_OFF || id === IDS.WIRE_ON)(id) || (id => id === IDS.SWITCH_OFF || id === IDS.SWITCH_ON || id === IDS.PLATE_OFF || id === IDS.PLATE_ON)(id) || (id => id === IDS.PUMP_IN || id === IDS.PUMP_OUT)(id),
               isPoweredSource = id => id === IDS.SWITCH_ON || id === IDS.PLATE_ON,
-              tmpIn = game._pumpTmpIn || (game._pumpTmpIn = new Int32Array(2)),
-              tmpOut = game._pumpTmpOut || (game._pumpTmpOut = new Int32Array(2)),
+              tmpIn = this._pumpTmpIn || (this._pumpTmpIn = new Int32Array(2)),
+              tmpOut = this._pumpTmpOut || (this._pumpTmpOut = new Int32Array(2)),
               pickNeighborWater = (x, y, outXY) => {
                 let nx = x,
                   ny = y + 1;
@@ -30308,21 +30308,21 @@ window.TU;
                   ny = y - 1;
                 return ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x + 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x - 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x, ny = y + 1, ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.AIR && (outXY[0] = nx, outXY[1] = ny, !0))));
               },
-              budget = game._perf && "low" === game._perf.level ? 1 : 3,
+              budget = this._perf && "low" === this._perf.level ? 1 : 3,
               tileVersion = 0 | world._tileVersion,
               machineVersion = 0 | world._machineVersion;
-            let netCache = game._pumpNetCache;
-            netCache && (0 | netCache.machineVersion) === machineVersion || (netCache = game._pumpNetCache = {
+            let netCache = this._pumpNetCache;
+            netCache && (0 | netCache.machineVersion) === machineVersion || (netCache = this._pumpNetCache = {
               tileVersion: tileVersion,
               machineVersion: machineVersion,
               byPump: new Map()
             });
             const byPump = netCache.byPump || (netCache.byPump = new Map());
-            let q = game._pumpQ,
-              out = game._pumpOut;
-            (!q || 24e3 > q.length) && (q = game._pumpQ = new Int32Array(24e3));
-            (!out || 2048 > out.length) && (out = game._pumpOut = new Int32Array(2048));
-            const compPumpIn = game._pumpCompIn || (game._pumpCompIn = []),
+            let q = this._pumpQ,
+              out = this._pumpOut;
+            (!q || 24e3 > q.length) && (q = this._pumpQ = new Int32Array(24e3));
+            (!out || 2048 > out.length) && (out = this._pumpOut = new Int32Array(2048));
+            const compPumpIn = this._pumpCompIn || (this._pumpCompIn = []),
               buildComponent = (seedPacked, sx, sy) => {
                 let qHead = 0,
                   qLen = 0,
@@ -30377,11 +30377,10 @@ window.TU;
                 rr = (0 | comp.rr) % outList.length;
               comp.rr = rr + 1 | 0;
               const ov = 0 | outList[rr];
-              pickNeighborOutput(ov >>> 16 & 65535, 65535 & ov, tmpOut) && (game._writeTileFast(tmpIn[0], tmpIn[1], BLOCK.AIR, !1), game._writeTileFast(tmpOut[0], tmpOut[1], BLOCK.WATER, !1), done++);
+              pickNeighborOutput(ov >>> 16 & 65535, 65535 & ov, tmpOut) && (this._writeTileFast(tmpIn[0], tmpIn[1], BLOCK.AIR, !1), this._writeTileFast(tmpOut[0], tmpOut[1], BLOCK.WATER, !1), done++);
             }
             m.pumpCursor = totalIn ? (cursor + (scanned || budget)) % totalIn : 0;
-          });
-          Game.prototype.__tuPumpGcOptInstalled = !0;
+          };
           const owner = "tu:pumps";
           window.GameEvents && window.GameEvents.on && window.GameEvents.on('game:update:post', (game, dtMs, dtClamped) => {
             if (!game) return;
