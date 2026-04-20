@@ -5551,60 +5551,53 @@ window.Events = {
   once: function(event, cb, opts) { return window.GameEvents.once(event, cb, opts); }
 };
 
-// --- TU Canvas State Optimizer (SCOPED - Phase 2 refactor) ---
-// REFACTORED: No longer hijacks HTMLCanvasElement.prototype.getContext globally.
-// Instead, provides a CanvasOptimizer that can be applied to specific canvases.
-// This prevents interference with third-party canvases, OffscreenCanvas, and
-// preserves V8 JIT optimization for non-game canvases.
-window.TU = window.TU || {};
-window.TU.CanvasOptimizer = {
-  /**
-   * Apply state-caching optimization to a specific 2D context.
-   * Reduces redundant C++ binding calls for globalAlpha and fillStyle.
-   * @param {CanvasRenderingContext2D} ctx - The context to optimize
-   * @returns {CanvasRenderingContext2D} The optimized context
-   */
-  optimize: function(ctx) {
-    if (!ctx || ctx.__tu_optimized) return ctx;
-    ctx.__tu_optimized = true;
-    let currentAlpha = 1, currentFill = "#000000";
-    Object.defineProperty(ctx, "globalAlpha", {
-      get: function() { return currentAlpha; },
-      set: function(val) {
-        currentAlpha !== val && (currentAlpha = val,
-        Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "globalAlpha").set.call(this, val));
-      }
-    });
-    Object.defineProperty(ctx, "fillStyle", {
-      get: function() { return currentFill; },
-      set: function(val) {
-        currentFill !== val && (currentFill = val,
-        Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "fillStyle").set.call(this, val));
-      }
-    });
-    const origSave = ctx.save, origRestore = ctx.restore, stateStack = [];
-    ctx.save = function() {
-      stateStack.push({ alpha: currentAlpha, fill: currentFill });
-      origSave.call(this);
-    };
-    ctx.restore = function() {
-      const state = stateStack.pop();
-      if (state) { currentAlpha = state.alpha; currentFill = state.fill; }
-      origRestore.call(this);
-    };
-    return ctx;
-  }
-};
-// Auto-apply to game canvas context when Renderer is created
-// (The Renderer constructor already calls canvas.getContext - we hook after that)
-if (window.GameEvents && window.GameEvents.on) {
-  window.GameEvents.once('game:init:post', function() {
-    const renderer = window.AppServices && window.AppServices.get('renderer');
-    if (renderer && renderer.ctx) {
-      window.TU.CanvasOptimizer.optimize(renderer.ctx);
+// --- TU Canvas State Optimizer Injected ---
+!function () {
+  const originalGetContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (type, options) {
+    const ctx = originalGetContext.call(this, type, options);
+    if ("2d" === type && ctx && !ctx.__tu_optimized) {
+      ctx.__tu_optimized = !0;
+      let currentAlpha = 1,
+        currentFill = "#000000";
+      // Override setters to prevent redundant calls to C++ bindings
+      Object.defineProperty(ctx, "globalAlpha", {
+        get: function () {
+          return currentAlpha;
+        },
+        set: function (val) {
+          currentAlpha !== val && (currentAlpha = val,
+          // Use internal setter
+          Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "globalAlpha").set.call(this, val));
+        }
+      });
+      Object.defineProperty(ctx, "fillStyle", {
+        get: function () {
+          return currentFill;
+        },
+        set: function (val) {
+          currentFill !== val && (currentFill = val, Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "fillStyle").set.call(this, val));
+        }
+      }); // Intercept save/restore to track state (optional, but complex, leaving alpha/fill is 80% of the gain)
+      const origSave = ctx.save,
+        origRestore = ctx.restore,
+        stateStack = [];
+      ctx.save = function () {
+        stateStack.push({
+          alpha: currentAlpha,
+          fill: currentFill
+        });
+        origSave.call(this);
+      };
+      ctx.restore = function () {
+        const state = stateStack.pop();
+        if (state) { currentAlpha = state.alpha; currentFill = state.fill; }
+        origRestore.call(this);
+      };
     }
-  });
-}
+    return ctx;
+  };
+}();
 // ------------------------------------------
 let __tu_rand_idx = 0;
 const __TU_RAND_LUT = new Float32Array(16384);
@@ -7631,199 +7624,6 @@ TU.SafeStorage = {
     }
   }
 };
-
-// === BlockRegistry: Deterministic Block ID Allocation (Pain Point #5) ===
-// Prevents ID drifting when patch load order changes.
-// Maintains a name -> ID palette mapping that is saved in save data headers.
-TU.BlockRegistry = (function() {
-  const _nameToId = new Map();  // block name -> numeric ID
-  const _idToName = new Map();  // numeric ID -> block name
-  let _frozen = false;
-  let _nextDynamic = 200; // Dynamic IDs start at 200 to avoid conflicts with base blocks
-
-  /**
-   * Build initial palette from the current BLOCK enum.
-   * Call this once after BLOCK is defined.
-   */
-  function buildFromBLOCK() {
-    const B = window.BLOCK;
-    if (!B) return;
-    for (const name in B) {
-      if (Object.prototype.hasOwnProperty.call(B, name)) {
-        const id = 0 | B[name];
-        _nameToId.set(name, id);
-        _idToName.set(id, name);
-      }
-    }
-  }
-
-  /**
-   * Allocate a stable ID for a dynamic block by name.
-   * If name was already allocated, returns existing ID.
-   * @param {string} name - Block name (e.g., 'PUMP_IN')
-   * @param {number} [hintId] - Preferred ID (used if available)
-   * @returns {number} Allocated block ID
-   */
-  function allocate(name, hintId) {
-    if (_nameToId.has(name)) return _nameToId.get(name);
-    const BD = window.BLOCK_DATA;
-    let id = hintId;
-    // If hint is available and not taken, use it
-    if (Number.isFinite(id) && id > 0 && id < 256 && !_idToName.has(id) && (!BD || !BD[id])) {
-      _nameToId.set(name, id);
-      _idToName.set(id, name);
-      return id;
-    }
-    // Otherwise find next free ID from _nextDynamic
-    while (_nextDynamic < 256 && (_idToName.has(_nextDynamic) || (BD && BD[_nextDynamic]))) {
-      _nextDynamic++;
-    }
-    if (_nextDynamic >= 256) {
-      console.error('[BlockRegistry] No free IDs for block:', name);
-      return hintId || 0;
-    }
-    id = _nextDynamic++;
-    _nameToId.set(name, id);
-    _idToName.set(id, name);
-    return id;
-  }
-
-  /**
-   * Export current palette for save data header.
-   * @returns {Object} { name: id, ... } mapping
-   */
-  function exportPalette() {
-    const out = {};
-    for (const [name, id] of _nameToId) out[name] = id;
-    return out;
-  }
-
-  /**
-   * Import palette from save data to restore ID mappings.
-   * @param {Object} palette - { name: id, ... } from save header
-   */
-  function importPalette(palette) {
-    if (!palette || typeof palette !== 'object') return;
-    for (const name in palette) {
-      if (Object.prototype.hasOwnProperty.call(palette, name)) {
-        const id = 0 | palette[name];
-        if (id > 0 && id < 256) {
-          _nameToId.set(name, id);
-          _idToName.set(id, name);
-        }
-      }
-    }
-  }
-
-  function getIdByName(name) { return _nameToId.get(name); }
-  function getNameById(id) { return _idToName.get(id); }
-  function size() { return _nameToId.size; }
-
-  return {
-    buildFromBLOCK,
-    allocate,
-    exportPalette,
-    importPalette,
-    getIdByName,
-    getNameById,
-    size
-  };
-})();
-
-// === StorageAdapter: Unified LS -> IDB -> Lite Degradation (Pain Point #4/#5) ===
-// Wraps the existing storage services into a single interface with explicit error reporting.
-TU.StorageAdapter = {
-  /**
-   * Get the best available storage backend.
-   * @returns {{ ls: Object|null, idb: Object|null, session: Object|null }}
-   */
-  _getBackends: function() {
-    return {
-      ls: window.AppServices && window.AppServices.get('storage'),
-      idb: window.AppServices && window.AppServices.get('indexedDBStorage'),
-      session: window.AppServices && window.AppServices.get('session')
-    };
-  },
-
-  /**
-   * Read from storage with automatic fallback: LS -> IDB.
-   * @param {string} key
-   * @returns {Promise<*>} Value or null
-   */
-  get: async function(key) {
-    const { ls, idb } = this._getBackends();
-    // Try localStorage first (sync, fast)
-    if (ls) {
-      const val = ls.get(key);
-      if (val !== null && val !== undefined) return val;
-    }
-    // Fallback to IDB (async)
-    if (idb && typeof idb.get === 'function') {
-      try {
-        const val = await idb.get(key);
-        if (val !== null && val !== undefined) return val;
-      } catch (e) {
-        console.warn('[StorageAdapter] IDB get failed:', key, e);
-      }
-    }
-    return null;
-  },
-
-  /**
-   * Write to storage with automatic fallback: LS -> IDB.
-   * Reports quota errors explicitly.
-   * @param {string} key
-   * @param {*} value
-   * @returns {Promise<{ok: boolean, lsOk: boolean, idbOk: boolean}>}
-   */
-  set: async function(key, value) {
-    const { ls, idb } = this._getBackends();
-    let lsOk = false, idbOk = false;
-    // Try LS first
-    if (ls) {
-      try {
-        ls.set(key, typeof value === 'string' ? value : JSON.stringify(value));
-        lsOk = true;
-      } catch (e) {
-        console.error('[StorageAdapter] LS set failed:', key, e);
-        const boundary = window.TU && window.TU.GlobalErrorBoundary;
-        if (e && (e.name === 'QuotaExceededError' || e.code === 22)) {
-          boundary && boundary._record('storage:quota', e, { key });
-        }
-      }
-    }
-    // Always also try IDB for redundancy
-    if (idb && typeof idb.set === 'function') {
-      try {
-        idbOk = await idb.set(key, value);
-      } catch (e) {
-        console.error('[StorageAdapter] IDB set failed:', key, e);
-      }
-    }
-    return { ok: lsOk || idbOk, lsOk, idbOk };
-  },
-
-  /**
-   * Remove from both LS and IDB.
-   */
-  remove: async function(key) {
-    const { ls, idb } = this._getBackends();
-    if (ls) try { ls.remove(key); } catch(e) {}
-    if (idb && typeof idb.remove === 'function') {
-      try { await idb.remove(key); } catch(e) {}
-    }
-  }
-};
-
-// Auto-build BlockRegistry from BLOCK when it becomes available
-if (window.GameEvents && window.GameEvents.on) {
-  window.GameEvents.once('game:init:post', function() {
-    if (window.BLOCK) TU.BlockRegistry.buildFromBLOCK();
-    console.log('[BlockRegistry] Initialized with', TU.BlockRegistry.size(), 'blocks');
-  });
-}
-// === End BlockRegistry & StorageAdapter ===
-
 const PerfMonitor = window.AppServices.get("perfMonitor") || {
   _samples: new Float32Array(60),
   _sampleCount: 0,
@@ -18813,13 +18613,6 @@ class Renderer {
    * @performance Initializes rendering contexts, post-processing buffers, and chunk cache
    */
   constructor(canvas) {
-    // === POST-FX PIPELINE (Phase 2 refactor) ===
-    // Linear array of { name, order, fn } - replaces nested wrapper "onion model"
-    // fn signature: fn(renderer, ctx, time, depth01, reducedMotion)
-    // Stages are sorted by order and executed sequentially in applyPostFX
-    this._postFxPipeline = [];
-    this._postFxPipelineSorted = false;
-
     window.GameEvents.on('renderer:setResolutionScale', scale => {
       if ("function" == typeof this.setResolutionScale) this.setResolutionScale(scale);
     });
@@ -21316,57 +21109,6 @@ class Renderer {
    */
   postProcess(time = .5) {
     this.applyPostFX(time, 0, !1);
-  }
-  // === POST-FX PIPELINE API (Phase 2 refactor) ===
-  /**
-   * Register a post-FX pipeline stage. Replaces the "onion wrapping" pattern.
-   * Stages are executed in order (lower order first) by applyPostFX.
-   * @param {string} name - Unique stage name (e.g., 'weather:tint', 'underwater:fog')
-   * @param {number} order - Execution order (0=first, higher=later)
-   * @param {Function} fn - fn(renderer, ctx, time, depth01, reducedMotion)
-   */
-  registerPostFxStage(name, order, fn) {
-    // Remove existing stage with same name (idempotent)
-    this._postFxPipeline = this._postFxPipeline.filter(s => s.name !== name);
-    this._postFxPipeline.push({ name, order, fn });
-    this._postFxPipelineSorted = false;
-  }
-  /**
-   * Run all registered post-FX pipeline stages in order.
-   * Called at the end of applyPostFX (after base effects).
-   * Lazily merges class-level stages (Renderer._pendingPostFxStages) on first call.
-   */
-  _runPostFxPipeline(time, depth01, reducedMotion) {
-    // Lazy-merge class-level stages from patches (registered before instance creation)
-    // Only runs once per instance (flag prevents per-frame overhead)
-    if (!this._postFxPendingMerged) {
-      const pending = Renderer._pendingPostFxStages;
-      if (pending && pending.length) {
-        for (let i = 0; i < pending.length; i++) {
-          const s = pending[i];
-          if (!this._postFxPipeline.some(e => e.name === s.name)) {
-            this._postFxPipeline.push(s);
-          }
-        }
-        this._postFxPipelineSorted = false;
-      }
-      this._postFxPendingMerged = true;
-    }
-    if (!this._postFxPipeline.length) return;
-    if (!this._postFxPipelineSorted) {
-      this._postFxPipeline.sort((a, b) => a.order - b.order);
-      this._postFxPipelineSorted = true;
-    }
-    const ctx = this.ctx;
-    for (let i = 0, len = this._postFxPipeline.length; i < len; i++) {
-      try {
-        this._postFxPipeline[i].fn(this, ctx, time, depth01, reducedMotion);
-      } catch (e) {
-        console.error('[PostFxPipeline] Stage "' + this._postFxPipeline[i].name + '" failed:', e);
-        const boundary = window.TU && window.TU.GlobalErrorBoundary;
-        boundary && boundary._record('postfx:' + this._postFxPipeline[i].name, e);
-      }
-    }
   }
   // Utility methods: merged from multiple patch versions for backward compatibility
   /**
@@ -26881,8 +26623,6 @@ window.TU;
           // Subtle grain (skip on low power)
           this._grainPattern && !lowFx && (ctx.globalAlpha = .045, ctx.fillStyle = this._grainPattern, ctx.fillRect(0, 0, 0 | w, 0 | h));
           ctx.restore();
-          // === PIPELINE: Run registered post-FX stages (weather tint, underwater, etc.) ===
-          this._runPostFxPipeline && this._runPostFxPipeline(time, depth01, reducedMotion);
         };
       }
       if (Game && Game.prototype) {
@@ -28767,9 +28507,13 @@ window.TU;
           }
         }), Renderer && Renderer.prototype && !Renderer.prototype.__weatherPostTintInstalled) {
           Renderer.prototype.__weatherPostTintInstalled = !0;
-          // REFACTORED: Weather tint registered as pipeline stage instead of wrapping applyPostFX
-          // The _weatherPostTintStage function is the extracted tint logic
-          Renderer.prototype._weatherPostTintStage = function (renderer, ctx, time, depth01, reducedMotion) {
+          const _orig = Renderer.prototype.applyPostFX;
+          Renderer.prototype.applyPostFX = function (time, depth01, reducedMotion) {
+            const gs = window.AppServices.get("settings") || {};
+            let mode = "number" == typeof gs.__postFxModeEffective ? gs.__postFxModeEffective : +gs.postFxMode;
+            if (Number.isFinite(mode) || (mode = 2), 0 >= mode) return;
+            // Run original postFX first (Bloom/fog/vignette/grain etc.)
+            _orig && _orig.call(this, time, depth01, reducedMotion);
             const fx = window.AppServices.get("weatherFx");
             if (!fx) return;
             const a = +fx.postA || 0,
@@ -28850,9 +28594,6 @@ window.TU;
             } catch(e){console.warn('[Catch]',e);}
             ctx.restore();
           };
-          // SUPERSEDED: This older weather tint is replaced by the optimized version
-          // registered as pipeline stage 'weather:tintOptimized' at order 10.
-          // _weatherPostTintStage method remains defined but unused.
         }
         // Usage example:
         //   TU.forceWeather('thunder', 1, 30000)   // 30s thunder
@@ -29241,30 +28982,36 @@ window.TU;
         // Renderer: optimize weather tint
         if (Renderer && Renderer.prototype && !Renderer.prototype.__weatherPostTintOptimized) {
           Renderer.prototype.__weatherPostTintOptimized = !0;
-          // REFACTORED: Optimized weather tint registered as pipeline stage instead of wrapping
-          Renderer._pendingPostFxStages = Renderer._pendingPostFxStages || [];
-          Renderer._pendingPostFxStages.push({
-            name: 'weather:tintOptimized',
-            order: 10,
-            fn: function(renderer, ctx, time, depth01, reducedMotion) {
-              const gs = window.AppServices.get("settings") || {};
-              let mode = "number" == typeof gs.__postFxModeEffective ? gs.__postFxModeEffective : +gs.postFxMode;
-              Number.isFinite(mode) || (mode = 2);
-              if (0 >= mode) return;
-              const fx = window.AppServices.get("weatherFx");
-              if (!fx) return;
-              let a = +fx.postA || 0,
-                lightning = +fx.lightning || 0,
-                r = 255 & fx.postR,
-                g = 255 & fx.postG,
-                b = 255 & fx.postB,
-                comp = fx.postMode || "source-over";
-              if (.001 >= a && .001 >= lightning) return;
-              const canvas = renderer.canvas;
-              if (!ctx || !canvas) return;
-              const wPx = 0 | canvas.width,
-                hPx = 0 | canvas.height,
-                cache = renderer._weatherPostCache || (renderer._weatherPostCache = {});
+          const prev = Renderer.prototype.applyPostFX;
+          Renderer.prototype.applyPostFX = function (time, depth01, reducedMotion) {
+            // Respect postFxMode like original wrapper
+            const gs = window.AppServices.get("settings") || {};
+            let mode = "number" == typeof gs.__postFxModeEffective ? gs.__postFxModeEffective : +gs.postFxMode;
+            Number.isFinite(mode) || (mode = 2);
+            const fx = window.AppServices.get("weatherFx");
+            let a = 0,
+              lightning = 0,
+              r = 0,
+              g = 0,
+              b = 0,
+              comp = "source-over";
+            fx && (a = +fx.postA || 0, lightning = +fx.lightning || 0, r = 255 & fx.postR, g = 255 & fx.postG, b = 255 & fx.postB, comp = fx.postMode || "source-over");
+            // Disable the older weather wrapper to avoid double-apply
+            let restoreA = null,
+              restoreL = null;
+            // If postFx is off, keep behavior consistent (no extra tint)
+            if (fx && (a > .001 || lightning > .001) && (restoreA = fx.postA, restoreL = fx.lightning, fx.postA = 0, fx.lightning = 0),
+            // Run original postFX pipeline
+            prev && prev.call(this, time, depth01, reducedMotion),
+            // Restore fx params for the rest of the game
+            fx && null !== restoreA && (fx.postA = restoreA, fx.lightning = restoreL), 0 >= mode) return;
+            if (.001 >= a && .001 >= lightning) return;
+            const ctx = this.ctx,
+              canvas = this.canvas;
+            if (!ctx || !canvas) return;
+            const wPx = 0 | canvas.width,
+              hPx = 0 | canvas.height,
+              cache = this._weatherPostCache || (this._weatherPostCache = {});
             if (cache.w !== wPx || cache.h !== hPx) {
               cache.w = wPx;
               cache.h = hPx; // Lightning radial gradient (alpha handled via globalAlpha)
@@ -29295,8 +29042,7 @@ window.TU;
               ctx.imageSmoothingEnabled = !1;
             } catch(e){console.warn('[Catch]',e);}
             ctx.restore();
-            }
-          });
+          };
         }
         // Game.render: draw weather overlay
         if (Game && Game.prototype && !Game.prototype.__weatherCanvasFxRenderInstalled) {
@@ -29425,10 +29171,15 @@ window.TU;
           })();
         }
         // NEUTRALIZED: AudioManager.enabled is now set in constructor (merged natively)
-        // Only the updateWeatherAmbience wrapper is skipped; battery saver is kept.
-        if (AudioManager && AudioManager.prototype) {
-          AudioManager.prototype.__tuAudioVisPatch = !0;
-          // Battery saver: suspend audio context when hidden (KEPT - extracted from neutralized block)
+        if (AudioManager && AudioManager.prototype) AudioManager.prototype.__tuAudioVisPatch = !0;
+        if (false && AudioManager && AudioManager.prototype && !AudioManager.prototype.__tuAudioVisPatch) {
+          if (AudioManager.prototype.__tuAudioVisPatch = !0, "function" == typeof AudioManager.prototype.updateWeatherAmbience) {
+            const _ua = AudioManager.prototype.updateWeatherAmbience;
+            AudioManager.prototype.updateWeatherAmbience = function (dtMs, weather) {
+              return void 0 === this.enabled && (this.enabled = !0), _ua.call(this, dtMs, weather);
+            };
+          }
+          // Battery saver: suspend audio context when hidden
           const suspendAudio = () => {
               const g = window.AppServices.get("game"),
                 audio = g && g.audio,
@@ -29447,10 +29198,19 @@ window.TU;
             };
           document.addEventListener("visibilitychange", () => {
             document.hidden ? suspendAudio() : resumeAudio();
-          }, { passive: !0 });
-          window.addEventListener("pageshow", resumeAudio, { passive: !0 });
-          window.addEventListener("focus", resumeAudio, { passive: !0 });
-          window.addEventListener("pagehide", suspendAudio, { passive: !0 });
+          }, {
+            passive: !0
+          });
+          window.addEventListener("pageshow", resumeAudio, {
+            passive: !0
+          });
+          window.addEventListener("focus", resumeAudio, {
+            passive: !0
+          });
+          // Pagehide: always suspend (best-effort)
+          window.addEventListener("pagehide", suspendAudio, {
+            passive: !0
+          });
         }
       }
     };
@@ -29491,15 +29251,7 @@ window.TU;
           return .34 > t ? "forest" : .68 > t ? "desert" : "snow";
         };
         const IDS = TU.LOGIC_BLOCKS || (TU.LOGIC_BLOCKS = {});
-        // REFACTORED: allocId now uses BlockRegistry for deterministic ID allocation
-        // Falls back to legacy scanning if BlockRegistry is not available
-        function allocId(start, name) {
-          // Use BlockRegistry for stable allocation if available
-          const registry = TU.BlockRegistry;
-          if (registry && name) {
-            return registry.allocate(name, start);
-          }
-          // Legacy fallback: scan for free ID
+        function allocId(start) {
           try {
             const used = new Set();
             if (BLOCK && "object" == typeof BLOCK) for (const k in BLOCK) used.add(0 | BLOCK[k]);
@@ -29541,11 +29293,10 @@ window.TU;
             }
           } catch(e){console.warn('[Catch]',e);}
         }
-        // REFACTORED: Pass block names for deterministic ID allocation via BlockRegistry
-        IDS.PUMP_IN || (IDS.PUMP_IN = allocId(206, 'PUMP_IN'));
-        IDS.PUMP_OUT || (IDS.PUMP_OUT = allocId(1 + (0 | IDS.PUMP_IN), 'PUMP_OUT'));
-        IDS.PLATE_OFF || (IDS.PLATE_OFF = allocId(1 + (0 | IDS.PUMP_OUT), 'PLATE_OFF'));
-        IDS.PLATE_ON || (IDS.PLATE_ON = allocId(1 + (0 | IDS.PLATE_OFF), 'PLATE_ON'));
+        IDS.PUMP_IN || (IDS.PUMP_IN = allocId(206));
+        IDS.PUMP_OUT || (IDS.PUMP_OUT = allocId(1 + (0 | IDS.PUMP_IN)));
+        IDS.PLATE_OFF || (IDS.PLATE_OFF = allocId(1 + (0 | IDS.PUMP_OUT)));
+        IDS.PLATE_ON || (IDS.PLATE_ON = allocId(1 + (0 | IDS.PLATE_OFF)));
         try {
           BD[IDS.PUMP_IN] || (addBlock(IDS.PUMP_IN, {
             name: "泵(入水口)",
@@ -29974,7 +29725,7 @@ window.TU;
         }
         if (Renderer && Renderer.prototype && !Renderer.prototype.__underwaterFogInstalled) {
           Renderer.prototype.__underwaterFogInstalled = !0;
-          // REFACTORED: Underwater fog registered as pipeline stage instead of wrapping applyPostFX
+          const prev = Renderer.prototype.applyPostFX;
           Renderer.prototype._ensureFogNoise = function () {
             if (this._fogNoise && 96 === this._fogNoise.width) return;
             const c = document.createElement("canvas");
@@ -29992,48 +29743,45 @@ window.TU;
             ctx.putImageData(img, 0, 0);
             this._fogNoise = c;
           };
-          // PIPELINE: Register underwater fog as stage (order 30) instead of wrapping
-          Renderer._pendingPostFxStages = Renderer._pendingPostFxStages || [];
-          Renderer._pendingPostFxStages.push({
-            name: 'underwater:fog',
-            order: 30,
-            fn: function(renderer, ctx, time, depth01, reducedMotion) {
-              const canvas = renderer.canvas;
-              if (!ctx || !canvas) return;
-              const wPx = 0 | canvas.width,
-                hPx = 0 | canvas.height,
-                d = Utils.clamp(+depth01 || 0, 0, 1),
-                deep = Math.max(0, (d - .55) / .45);
-              deep > .01 && (ctx.save(), ctx.setTransform(1, 0, 0, 1, 0, 0), ctx.globalCompositeOperation = "multiply", ctx.globalAlpha = Math.min(.22, .06 + .18 * deep),
-              ctx.globalAlpha = Math.min(.28, .08 + .2 * deep), ctx.fillStyle = "#1e2837", ctx.fillRect(0, 0, 0 | wPx, 0 | hPx), ctx.restore());
-              // Underwater overlay
-              try {
-                const g = window.AppServices.get("game"),
-                  p = g && g.player,
-                  world = window.AppServices.get("world"),
-                  ts = CFG && CFG.TILE_SIZE ? CFG.TILE_SIZE : 16;
-                if (p && world && world.tiles) {
-                  const tx = (p.x + .5 * p.w) / ts | 0,
-                    ty = (p.y + .6 * p.h) / ts | 0;
-                  if (tx >= 0 && ty >= 0 && tx < world.w && ty < world.h && world.tiles[tx][ty] === BLOCK.WATER) {
-                    ctx.save();
-                    ctx.setTransform(1, 0, 0, 1, 0, 0);
-                    ctx.globalCompositeOperation = "screen";
-                    ctx.globalAlpha = .14;
-                    ctx.fillStyle = "rgba(90, 170, 255, 1)";
-                    ctx.fillRect(0, 0, 0 | wPx, 0 | hPx);
-                    ctx.globalAlpha = .08;
-                    const g2 = ctx.createLinearGradient(0, 0, 0, hPx);
-                    g2.addColorStop(0, "rgba(120,200,255,0.0)");
-                    g2.addColorStop(1, "rgba(40,110,220,0.9)");
-                    ctx.fillStyle = g2;
-                    ctx.fillRect(0, 0, 0 | wPx, 0 | hPx);
-                    ctx.restore();
-                  }
+          Renderer.prototype.applyPostFX = function (time, depth01, reducedMotion) {
+            prev && prev.call(this, time, depth01, reducedMotion);
+            const ctx = this.ctx,
+              canvas = this.canvas;
+            if (!ctx || !canvas) return;
+            const wPx = 0 | canvas.width,
+              hPx = 0 | canvas.height,
+              d = Utils.clamp(+depth01 || 0, 0, 1),
+              deep = Math.max(0, (d - .55) / .45);
+            deep > .01 && (ctx.save(), ctx.setTransform(1, 0, 0, 1, 0, 0), ctx.globalCompositeOperation = "multiply", ctx.globalAlpha = Math.min(.22, .06 + .18 * deep),
+            // Tint base
+            ctx.globalAlpha = Math.min(.28, .08 + .2 * deep), ctx.fillStyle = "#1e2837", ctx.fillRect(0, 0, 0 | wPx, 0 | hPx), ctx.restore());
+            // Underwater overlay
+            try {
+              const g = window.AppServices.get("game"),
+                p = g && g.player,
+                world = window.AppServices.get("world"),
+                ts = CFG && CFG.TILE_SIZE ? CFG.TILE_SIZE : 16;
+              if (p && world && world.tiles) {
+                const tx = (p.x + .5 * p.w) / ts | 0,
+                  ty = (p.y + .6 * p.h) / ts | 0;
+                if (tx >= 0 && ty >= 0 && tx < world.w && ty < world.h && world.tiles[tx][ty] === BLOCK.WATER) {
+                  ctx.save();
+                  ctx.setTransform(1, 0, 0, 1, 0, 0);
+                  ctx.globalCompositeOperation = "screen";
+                  ctx.globalAlpha = .14;
+                  ctx.fillStyle = "rgba(90, 170, 255, 1)";
+                  ctx.fillRect(0, 0, 0 | wPx, 0 | hPx);
+                  ctx.globalAlpha = .08;
+                  const g2 = ctx.createLinearGradient(0, 0, 0, hPx);
+                  g2.addColorStop(0, "rgba(120,200,255,0.0)");
+                  g2.addColorStop(1, "rgba(40,110,220,0.9)");
+                  ctx.fillStyle = g2;
+                  ctx.fillRect(0, 0, 0 | wPx, 0 | hPx);
+                  ctx.restore();
                 }
-              } catch(e){console.warn('[Catch]',e);}
-            }
-          });
+              }
+            } catch(e){console.warn('[Catch]',e);}
+          };
         }
         if (Renderer && Renderer.prototype && !Renderer.prototype.__cloudBiomeSkyInstalled) {
           Renderer.prototype.__cloudBiomeSkyInstalled = !0;
@@ -31702,26 +31450,8 @@ window.TU;
             parts.push("  return { ensureLoaded, count, pick };\n");
             parts.push("})();\n");
             // Include generator classes.
-            // SAFETY: Validate toString() output to catch minification/closure-stripping issues
-            if (NG) {
-              const ngStr = NG.toString();
-              if (!ngStr || ngStr.length < 50 || ngStr.includes('[native code]')) {
-                console.error('[WorkerBuilder] NoiseGenerator.toString() failed or returned native code - Worker may malfunction');
-                const boundary = window.TU && window.TU.GlobalErrorBoundary;
-                boundary && boundary._record('worker:toString', new Error('NoiseGenerator stringify failed'), { len: ngStr ? ngStr.length : 0 });
-              }
-              parts.push(ngStr, "\n");
-            }
-            if (WG) {
-              const wgStr = WG.toString();
-              if (!wgStr || wgStr.length < 100 || wgStr.includes('[native code]')) {
-                console.error('[WorkerBuilder] WorldGenerator.toString() failed or returned native code - Worker may malfunction');
-                const boundary = window.TU && window.TU.GlobalErrorBoundary;
-                boundary && boundary._record('worker:toString', new Error('WorldGenerator stringify failed'), { len: wgStr ? wgStr.length : 0 });
-              }
-              parts.push(wgStr, "\n");
-            }
-            // Re-apply any prototype patches that were applied on the main thread (biomes/structures/etc).
+            NG && parts.push(NG.toString(), "\n");
+            WG && parts.push(WG.toString(), "\n"); // Re-apply any prototype patches that were applied on the main thread (biomes/structures/etc).
             const patchNames = ["_weldStructuresFromLibrary", "_carveConnectorTunnel", "_biome", "_getSurfaceBlock", "_getSubSurfaceBlock", "_getUndergroundBlock", "_getUndergroundBlockLegacy", "_fillEnclosedWalls", "_placeTemple", "_generateMultiLayerMines"];
             if (WG && WG.prototype) for (let i = 0, _len36 = patchNames.length; _len36 > i; i++) {
               const name = patchNames[i],
