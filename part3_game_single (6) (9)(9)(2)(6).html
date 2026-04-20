@@ -28775,8 +28775,7 @@ window.TU;
             const a = +fx.postA || 0,
               lightning = +fx.lightning || 0;
             if (.001 >= a && .001 >= lightning) return;
-            const ctx = this.ctx,
-              canvas = this.canvas;
+            const canvas = this.canvas;
             if (!ctx || !canvas) return;
             const wPx = 0 | canvas.width,
               hPx = 0 | canvas.height;
