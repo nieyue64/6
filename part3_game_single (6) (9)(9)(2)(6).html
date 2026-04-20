@@ -28769,13 +28769,13 @@ window.TU;
           Renderer.prototype.__weatherPostTintInstalled = !0;
           // REFACTORED: Weather tint registered as pipeline stage instead of wrapping applyPostFX
           // The _weatherPostTintStage function is the extracted tint logic
-          Renderer.prototype._weatherPostTintStage = function (renderer, ctx, time, depth01, reducedMotion) {
+          Renderer.prototype._weatherPostTintStage = function (renderer, _ctx, time, depth01, reducedMotion) {
             const fx = window.AppServices.get("weatherFx");
             if (!fx) return;
             const a = +fx.postA || 0,
               lightning = +fx.lightning || 0;
             if (.001 >= a && .001 >= lightning) return;
-            const ctx = this.ctx,
+            const ctx = this.ctx || _ctx,
               canvas = this.canvas;
             if (!ctx || !canvas) return;
             const wPx = 0 | canvas.width,
