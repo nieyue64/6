@@ -5187,7 +5187,7 @@ document.getElementById('error-toggle')?.addEventListener('click', function() {
   function installAll() {
     const PatchManager = window.PatchManager || TU.PatchManager || null;
     const safe = TU.Safe && TU.Safe.run ? TU.Safe : null;
-    const logger = window.AppServices.get("logger");
+    const logger = window.AppServices && window.AppServices.get ? window.AppServices.get("logger") : console;
     const ordered = list();
     for (let i = 0; i < ordered.length; i++) {
       const p = ordered[i];
@@ -30312,9 +30312,6 @@ window.TU;
             if (!(totalIn && 0 | m.pumpsOut.length)) return;
             if (game._pumpAcc = (game._pumpAcc || 0) + (d || 0), 220 > game._pumpAcc) return;
             game._pumpAcc = 0;
-            const w = 0 | world.w,
-              h = 0 | world.h,
-              tiles = world.tiles;
             game._pumpVisited && game._pumpVisited.length === w * h || (game._pumpVisited = new Uint32Array(w * h), game._pumpStamp = 1);
             const vis = game._pumpVisited;
             let stamp = game._pumpStamp >>> 0 || 1;
