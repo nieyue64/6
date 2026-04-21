@@ -32161,14 +32161,14 @@ window.TU;
                   const gp = 0 | gtex.__pad;
                   gctx.drawImage(gtex, lx * ts + pad - gp, ly * ts + pad - gp);
                   entry.hasGlow = !0;
-                } else if (tex) try {
+                } else if (tex) {
                   gctx.save();
                   gctx.shadowColor = void 0 !== BLOCK_COLOR && BLOCK_COLOR[id] ? BLOCK_COLOR[id] : "#ffffff";
                   gctx.shadowBlur = 2 * bl;
                   gctx.drawImage(tex, lx * ts + pad, ly * ts + pad);
                   gctx.restore();
                   entry.hasGlow = !0;
-                } catch(e){console.warn('[Catch]',e);}
+                }
               } else tex && ctx.drawImage(tex, lx * ts, ly * ts);
             }
           }
@@ -32207,7 +32207,7 @@ window.TU;
         // Preserve worker-rendered fast path (if present)
         try {
           const ww = this.__ww;
-          if (0 && ww && ww.renderEnabled && ww.worldReady) {
+          if (ww && ww.renderEnabled && ww.worldReady) {
             ww.requestFrame(cam, time, this);
             const bm = ww.consumeBitmap();
             if (bm) try {
