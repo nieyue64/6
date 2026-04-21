@@ -5470,21 +5470,30 @@ window.GameEvents = new class EventBus {
     if (void 0 !== event) return void this.off(event, owner);
     for (const e of this.listeners.keys()) this.off(e, owner);
   }
-  emit(e, ...args) {
+  emit(e, a, b, c, d) {
     if (!this.listeners.has(e)) return;
     const set = this.listeners.get(e);
-    const toDelete = [];
-    for (const rec of set) {
+    let toDelete = null;
+    const it = set.values();
+    let res = it.next();
+    while (!res.done) {
+      const rec = res.value;
+      res = it.next();
       if (!rec || "function" != typeof rec.cb) continue;
       try {
-        rec.cb(...args);
+        rec.cb(a, b, c, d);
       } catch (err) {
-        const logger = window.AppServices.get("logger");
+        const logger = window.AppServices && window.AppServices.get ? window.AppServices.get("logger") : console;
         logger && logger.error ? logger.error("GameEvents:" + e, err) : console.error("GameEvents:" + e, err);
       }
-      rec.once && toDelete.push(rec);
+      if (rec.once) {
+        toDelete = toDelete || [];
+        toDelete.push(rec);
+      }
     }
-    for (const rec of toDelete) set.delete(rec);
+    if (toDelete) {
+      for (let i = 0; i < toDelete.length; i++) set.delete(toDelete[i]);
+    }
     set.size || this.listeners.delete(e);
   }
   _offRec(e, rec) {
@@ -16097,6 +16106,32 @@ class Player {
      * @param {number} dy - Y movement in pixels (already scaled by dtScale)
      */);
   }
+  _scanColSolid(tx, ty0, ty1, solid, ww, wh, useFlat, H, tf, tiles) {
+    if (0 > tx || tx >= ww) return !1;
+    if (0 > ty1 || ty0 >= wh) return !1;
+    if (0 > ty0 && (ty0 = 0), ty1 >= wh && (ty1 = wh - 1), useFlat) {
+      const base = tx * H | 0;
+      for (let ty = ty0; ty1 >= ty; ty++) if (solid[0 | tf[base + ty]]) return !0;
+      return !1;
+    }
+    const col = tiles[tx];
+    if (!col) return !1;
+    for (let ty = ty0; ty1 >= ty; ty++) if (solid[0 | col[ty]]) return !0;
+    return !1;
+  }
+  _scanRowSolid(ty, tx0, tx1, solid, ww, wh, useFlat, H, tf, tiles) {
+    if (0 > ty || ty >= wh) return !1;
+    if (0 > tx1 || tx0 >= ww) return !1;
+    if (0 > tx0 && (tx0 = 0), tx1 >= ww && (tx1 = ww - 1), useFlat) {
+      for (let tx = tx0; tx1 >= tx; tx++) if (solid[0 | tf[tx * H + ty | 0]]) return !0;
+      return !1;
+    }
+    for (let tx = tx0; tx1 >= tx; tx++) {
+      const col = tiles[tx];
+      if (col && solid[0 | col[ty]]) return !0;
+    }
+    return !1;
+  }
   _moveCollide(world, dx, dy) {
     // Early exit: no movement means no collision check needed
     if (0 === dx && 0 === dy) return;
@@ -16140,33 +16175,7 @@ class Player {
       tf = world.tilesFlat,
       H = 0 | world.h,
       useFlat = !(!tf || tf.length !== (ww * wh | 0)),
-      tiles = world.tiles,
-      scanColSolid = (tx, ty0, ty1) => {
-        if (0 > tx || tx >= ww) return !1;
-        if (0 > ty1 || ty0 >= wh) return !1;
-        if (0 > ty0 && (ty0 = 0), ty1 >= wh && (ty1 = wh - 1), useFlat) {
-          const base = tx * H | 0;
-          for (let ty = ty0; ty1 >= ty; ty++) if (solid[0 | tf[base + ty]]) return !0;
-          return !1;
-        }
-        const col = tiles[tx];
-        if (!col) return !1;
-        for (let ty = ty0; ty1 >= ty; ty++) if (solid[0 | col[ty]]) return !0;
-        return !1;
-      },
-      scanRowSolid = (ty, tx0, tx1) => {
-        if (0 > ty || ty >= wh) return !1;
-        if (0 > tx1 || tx0 >= ww) return !1;
-        if (0 > tx0 && (tx0 = 0), tx1 >= ww && (tx1 = ww - 1), useFlat) {
-          for (let tx = tx0; tx1 >= tx; tx++) if (solid[0 | tf[tx * H + ty | 0]]) return !0;
-          return !1;
-        }
-        for (let tx = tx0; tx1 >= tx; tx++) {
-          const col = tiles[tx];
-          if (col && solid[0 | col[ty]]) return !0;
-        }
-        return !1;
-      };
+      tiles = world.tiles;
     if (dx) {
       const top = .0625 * this.y | 0,
         bot = .0625 * (this.y + this.h - .001) | 0;
@@ -16175,7 +16184,7 @@ class Player {
           newX = this.x + dx,
           newR = .0625 * (newX + this.w - .001) | 0;
         let hit = !1;
-        for (let tx = oldR + 1; newR >= tx; tx++) if (scanColSolid(tx, top, bot)) {
+        for (let tx = oldR + 1; newR >= tx; tx++) if (this._scanColSolid(tx, top, bot, solid, ww, wh, useFlat, H, tf, tiles)) {
           hit = !0;
           break;
         }
@@ -16189,7 +16198,7 @@ class Player {
           newX = this.x + dx,
           newL = .0625 * newX | 0;
         let hit = !1;
-        for (let tx = oldL - 1; tx >= newL; tx--) if (scanColSolid(tx, top, bot)) {
+        for (let tx = oldL - 1; tx >= newL; tx--) if (this._scanColSolid(tx, top, bot, solid, ww, wh, useFlat, H, tf, tiles)) {
           hit = !0;
           break;
         }
@@ -16208,7 +16217,7 @@ class Player {
           newY = this.y + dy,
           newB = .0625 * (newY + this.h - .001) | 0;
         let hit = !1;
-        for (let ty = oldB + 1; newB >= ty; ty++) if (scanRowSolid(ty, left, right)) {
+        for (let ty = oldB + 1; newB >= ty; ty++) if (this._scanRowSolid(ty, left, right, solid, ww, wh, useFlat, H, tf, tiles)) {
           hit = !0;
           break;
         }
@@ -16218,7 +16227,7 @@ class Player {
           newY = this.y + dy,
           newT = .0625 * newY | 0;
         let hit = !1;
-        for (let ty = oldT - 1; ty >= newT; ty--) if (scanRowSolid(ty, left, right)) {
+        for (let ty = oldT - 1; ty >= newT; ty--) if (this._scanRowSolid(ty, left, right, solid, ww, wh, useFlat, H, tf, tiles)) {
           hit = !0;
           break;
         }
@@ -16781,8 +16790,7 @@ class TouchController {
       this.crosshair.x = clientX;
       this.crosshair.y = clientY;
     }
-    el.style.left = clientX - 20 + "px";
-    el.style.top = clientY - 20 + "px";
+    el.style.transform = `translate3d(${clientX - 20}px, ${clientY - 20}px, 0)`;
   }
   _setupButton(id, action) {
     const btn = document.getElementById(id);
@@ -22503,8 +22511,7 @@ class UIManager {
     sy -= 8;
     const cx = Math.max(10 + .5 * mw, Math.min(vw - 10 - .5 * mw, sx)),
       cy = Math.max(10 + mh, Math.min(vh - 10, sy));
-    this.miningBarEl.style.left = cx + "px";
-    this.miningBarEl.style.top = cy + "px";
+    this.miningBarEl.style.transform = `translate3d(${cx}px, ${cy}px, 0)`;
   }
   hideMining() {
     window.GameEvents && window.GameEvents.emit && window.GameEvents.emit('ui:mining:end');
@@ -23310,8 +23317,7 @@ class InventoryUI {
   }
   /** @param {number} x - Client X @param {number} y - Client Y @private */
   _showHeldAt(x, y) {
-    this.heldEl.style.left = x + "px";
-    this.heldEl.style.top = y + "px";
+    this.heldEl.style.transform = `translate3d(${x}px, ${y}px, 0)`;
   }
   _hideHeld() {
     this.heldEl.style.display = "none";
