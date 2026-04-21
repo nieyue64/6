@@ -30170,6 +30170,12 @@ window.TU;
             };
             Number.isFinite(world._machineVersion) || (world._machineVersion = 1);
           };
+          const _removePacked = (arr, key) => {
+            const i = arr.indexOf(key);
+            if (0 > i) return !1;
+            const last = arr.length - 1;
+            return i !== last && (arr[i] = arr[last]), arr.pop(), !0;
+          };
           Game.prototype._syncMachineAt = function (x, y, id) {
             const m = this._machines;
             if (!m) return;
@@ -30177,14 +30183,8 @@ window.TU;
               isMachineTile = id === IDS.PUMP_IN || id === IDS.PUMP_OUT || id === IDS.PLATE_OFF || id === IDS.PLATE_ON,
               keys = m.machineKeys || (m.machineKeys = new Set());
             if (!keys.has(key) && !isMachineTile) return;
-            const removePacked = arr => {
-              const i = arr.indexOf(key);
-              if (0 > i) return !1;
-              const last = arr.length - 1;
-              return i !== last && (arr[i] = arr[last]), arr.pop(), !0;
-            };
-            removePacked(m.pumpsIn);
-            removePacked(m.pumpsOut);
+            _removePacked(m.pumpsIn, key);
+            _removePacked(m.pumpsOut, key);
             m.plates.delete(key);
             keys.delete(key);
             id === IDS.PUMP_IN ? (m.pumpsIn.push(key), keys.add(key)) : id === IDS.PUMP_OUT ? (m.pumpsOut.push(key), keys.add(key)) : id !== IDS.PLATE_OFF && id !== IDS.PLATE_ON || (m.plates.add(key), keys.add(key));
@@ -30399,12 +30399,16 @@ window.TU;
               "function" == typeof game._pumpSim && game._pumpSim(d);
             } catch(e){console.warn('[Catch]',e);}
             try {
-              const ts = CFG && CFG.TILE_SIZE ? CFG.TILE_SIZE : 16,
-                d01 = Utils.clamp((window.AppServices.get("player").y + .6 * window.AppServices.get("player").h) / (window.AppServices.get("world").h * ts), 0, 1),
-                tx = (window.AppServices.get("player").x + .5 * window.AppServices.get("player").w) / ts | 0,
-                ty = (window.AppServices.get("player").y + 2) / ts | 0,
-                enclosed = tx >= 0 && ty >= 0 && tx < window.AppServices.get("world").w && ty < window.AppServices.get("world").h && SOLID[window.AppServices.get("world").getTile ? window.AppServices.get("world").getTile(tx, ty) : window.AppServices.get("world").tiles[tx][ty]] ? 1 : 0;
-              window.GameEvents.emit('audio:setEnvironment', d01, enclosed);
+              const p = game.player || window.AppServices.get("player");
+              const w = game.world || window.AppServices.get("world");
+              if (p && w) {
+                const ts = CFG && CFG.TILE_SIZE ? CFG.TILE_SIZE : 16,
+                  d01 = Utils.clamp((p.y + .6 * p.h) / (w.h * ts), 0, 1),
+                  tx = (p.x + .5 * p.w) / ts | 0,
+                  ty = (p.y + 2) / ts | 0,
+                  enclosed = tx >= 0 && ty >= 0 && tx < w.w && ty < w.h && SOLID[w.getTile ? w.getTile(tx, ty) : w.tiles[tx][ty]] ? 1 : 0;
+                window.GameEvents.emit('audio:setEnvironment', d01, enclosed);
+              }
             } catch(e){console.warn('[Catch]',e);}
             if (game._tuUpdateAcidRainDamage) try {
               const acidDt = 50 > d ? d : 50;
