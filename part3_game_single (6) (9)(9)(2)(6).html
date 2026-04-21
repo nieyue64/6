@@ -30228,6 +30228,16 @@ window.TU;
             "function" == typeof game._indexMachines && game._indexMachines();
           });
           // Pressure plate collision
+          const _markPlateUnder = (ent, ts, w, h, platesSet, next) => {
+            if (!ent) return;
+            const cx = ent.x + .5 * ent.w,
+              fy = ent.y + ent.h + 1,
+              tx = cx / ts | 0,
+              ty = fy / ts | 0;
+            if (0 > tx || 0 > ty || tx >= w || ty >= h) return;
+            const key = (65535 & tx) << 16 | 65535 & ty;
+            platesSet && platesSet.has(key) && next.add(key);
+          };
           window.GameEvents.on("game:update", (dtMs, game) => {
             const world = window.AppServices.get("world"),
               m = game._machines;
@@ -30240,20 +30250,10 @@ window.TU;
               next = game._plateNext || (game._plateNext = new Set());
             1 !== game._plateKeyMode && (pressed.clear(), next.clear(), game._plateKeyMode = 1);
             next.clear();
-            const platesSet = m.plates,
-              markPlateUnder = ent => {
-                if (!ent) return;
-                const cx = ent.x + .5 * ent.w,
-                  fy = ent.y + ent.h + 1,
-                  tx = cx / ts | 0,
-                  ty = fy / ts | 0;
-                if (0 > tx || 0 > ty || tx >= w || ty >= h) return;
-                const key = (65535 & tx) << 16 | 65535 & ty;
-                platesSet && platesSet.has(key) && next.add(key);
-              };
-            markPlateUnder(window.AppServices.get("player"));
+            const platesSet = m.plates;
+            _markPlateUnder(window.AppServices.get("player"), ts, w, h, platesSet, next);
             const ents = game.entities || game.mobs || game.enemies;
-            if (Array.isArray(ents)) for (let i = 0, len = ents.length; len > i; i++) markPlateUnder(ents[i]);
+            if (Array.isArray(ents)) for (let i = 0, len = ents.length; len > i; i++) _markPlateUnder(ents[i], ts, w, h, platesSet, next);
             for (const k of next) {
               if (pressed.has(k)) continue;
               pressed.add(k);
@@ -30305,7 +30305,6 @@ window.TU;
             this._pumpVisited && this._pumpVisited.length === w * h || (this._pumpVisited = new Uint32Array(w * h), this._pumpStamp = 1);
             const vis = this._pumpVisited;
             let stamp = this._pumpStamp >>> 0 || 1;
-            const nextStamp = () => (stamp = stamp + 1 >>> 0, 0 === stamp && (vis.fill(0), stamp = 1), this._pumpStamp = stamp, stamp);
             const tmpIn = this._pumpTmpIn || (this._pumpTmpIn = new Int32Array(2));
             const tmpOut = this._pumpTmpOut || (this._pumpTmpOut = new Int32Array(2));
             const budget = this._perf && "low" === this._perf.level ? 1 : 3,
@@ -30343,7 +30342,7 @@ window.TU;
                   outLen = 0,
                   powered = !1,
                   nodes = 0;
-                const curStamp = nextStamp();
+                const curStamp = (stamp = stamp + 1 >>> 0, 0 === stamp && (vis.fill(0), stamp = 1), this._pumpStamp = stamp, stamp);
                 for (vis[sx + sy * w | 0] = curStamp, q[qLen++] = (65535 & sx) << 16 | 65535 & sy, compPumpIn.length = 0; qLen > qHead && 24e3 > nodes;) {
                   const v = 0 | q[qHead++],
                     cx = v >>> 16 & 65535,
