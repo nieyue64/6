@@ -33701,6 +33701,12 @@ window.addEventListener("load", () => {
         return (Date.now()) >>> 0;
       }
       _packWire(data) {
+        const _GlobalAB = typeof globalThis !== "undefined" ? globalThis.ArrayBuffer : self.ArrayBuffer;
+        if (!this.SHARED_BUFFER) this.SHARED_BUFFER = new _GlobalAB(1048576);
+        let __len = 0;
+        const _self = this;
+        const ArrayBuffer = function(len) { __len = len; return _self.SHARED_BUFFER; };
+        const res = (() => {
         if (!data || !data.t) return "";
         switch (data.t) {
           case "pos":
@@ -33866,6 +33872,8 @@ window.addEventListener("load", () => {
           default:
             return "";
         }
+        })();
+        return res === this.SHARED_BUFFER ? new Uint8Array(this.SHARED_BUFFER, 0, __len) : res;
       }
       _unpackWire(msg) {
         if (!(msg instanceof ArrayBuffer || ArrayBuffer.isView(msg))) return null;
