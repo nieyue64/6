@@ -24433,13 +24433,11 @@ class Game {
     if (this._rafRunning) return;
     this._rafRunning = !0;
     window.GameEvents && window.GameEvents.emit && window.GameEvents.emit('game:raf:start', this);
-    this._rafRunning && requestAnimationFrame(this._rafCb
-    /**
-     * @description RAF control for tab visibility and power saving
-     * @pause _stopRafForHidden() - Stops RAF loop, sets _rafStoppedForHidden flag
-     * @resume _resumeRafIfNeeded() - Restarts RAF if was stopped for hidden, resets timers
-     * @power-saving Background tab stops rendering to reduce CPU/battery usage
-     */);
+    this._rafRunning && (
+      ((this.settings && this.settings.targetFps ? this.settings.targetFps : 144) > 60)
+        ? setTimeout(() => this._rafCb(performance.now()), 1e3 / (this.settings && this.settings.targetFps ? this.settings.targetFps : 144))
+        : requestAnimationFrame(this._rafCb)
+    );
   }
   _stopRafForHidden() {
     this._rafRunning = !1;
@@ -24701,7 +24699,7 @@ class Game {
       renderer = this.renderer;
     if (!(cam && world && player && renderer))
       // Game not ready yet, skip this frame and try again next frame
-      return void (this._rafRunning && requestAnimationFrame(this._rafCb));
+      return void (this._rafRunning && (((this.settings && this.settings.targetFps ? this.settings.targetFps : 144) > 60) ? setTimeout(() => this._rafCb(performance.now()), 1e3 / (this.settings && this.settings.targetFps ? this.settings.targetFps : 144)) : requestAnimationFrame(this._rafCb)));
     let perfMonitor = this._externalPerfMonitor;
     !perfMonitor && window.AppServices.get('perfMonitor') && "function" == typeof window.AppServices.get('perfMonitor').frame && (perfMonitor = this._externalPerfMonitor = window.AppServices.get("perfMonitor"));
     perfMonitor && perfMonitor.frame(timestamp);
@@ -24716,7 +24714,7 @@ class Game {
     const frameSkipMask = this._frameSkipMask || 0;
     if (frameSkipMask && 0 !== (this._frameId & frameSkipMask) && dtRaw > 33)
       // Skip non-critical work on this frame when running behind
-      return this.lastTime = timestamp, this._frameId = (this._frameId || 0) + 1, void (this._rafRunning && requestAnimationFrame(this._rafCb));
+      return this.lastTime = timestamp, this._frameId = (this._frameId || 0) + 1, void (this._rafRunning && (((this.settings && this.settings.targetFps ? this.settings.targetFps : 144) > 60) ? setTimeout(() => this._rafCb(performance.now()), 1e3 / (this.settings && this.settings.targetFps ? this.settings.targetFps : 144)) : requestAnimationFrame(this._rafCb)));
     this._frameId = (this._frameId || 0) + 1;
     this._frameId > 1e9 && (this._frameId = 1);
     this.renderer && (this.renderer._frameId = this._frameId);
@@ -24917,7 +24915,7 @@ class Game {
     const rmask = this._renderSkipMask || 0;
     if (rmask && 0 !== (this._frameId & rmask)) {
       const uiFlush = this.uiFlush;
-      return uiFlush && uiFlush.flush(), void (this._rafRunning && requestAnimationFrame(this._rafCb));
+      return uiFlush && uiFlush.flush(), void (this._rafRunning && (((this.settings && this.settings.targetFps ? this.settings.targetFps : 144) > 60) ? setTimeout(() => this._rafCb(performance.now()), 1e3 / (this.settings && this.settings.targetFps ? this.settings.targetFps : 144)) : requestAnimationFrame(this._rafCb)));
     }
     if ("function" == typeof renderer.checkFlicker && renderer.checkFlicker(timestamp), guarded) try {
       this.render();
@@ -24930,8 +24928,11 @@ class Game {
     uiFlush && uiFlush.flush();
     frameHadError || (this._loopErrorCount = 0, this._loopErrorWindowStart = 0);
     
-    // Always use requestAnimationFrame for the loop, don't fallback to setTimeout which locks at 60Hz
-    this._rafRunning && requestAnimationFrame(this._rafCb);
+    this._rafRunning && (
+      (((this.settings && this.settings.targetFps ? this.settings.targetFps : 144) > 60) 
+        ? setTimeout(() => this._rafCb(performance.now()), 1e3 / (this.settings && this.settings.targetFps ? this.settings.targetFps : 144)) 
+        : requestAnimationFrame(this._rafCb))
+    );
   }
   _updateDynamicChunks(player, world) {
     if (!world._generator) return;
