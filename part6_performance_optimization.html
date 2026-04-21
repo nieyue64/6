@@ -7458,7 +7458,11 @@ Object.assign(TU.Utils, {
       dy = y2 - y1;
     return dx * dx + dy * dy;
   },
-  dist: (x1, y1, x2, y2) => Math.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1)),
+  dist: (x1, y1, x2, y2) => {
+    const dx = x2 - x1, dy = y2 - y1;
+    const distSq = dx * dx + dy * dy;
+    return distSq > 0 ? (distSq < 65536 ? (TU.Utils.FastMath._sqrtTable || TU.Utils.FastMath._initSqrtTable(), TU.Utils.FastMath._sqrtTable[0 | distSq]) : Math.sqrt(distSq)) : 0;
+  },
   /**
    * @param {number} x - X coordinate (0-65535)
    * @param {number} y - Y coordinate (0-65535)
@@ -13942,7 +13946,7 @@ class WorldGenerator {
       if (0 > x || x >= this.w) continue;
       const depthSq = craterRadiusSq - dx * dx;
       if (0 > depthSq) continue;
-      const depth = .7 * Math.sqrt(depthSq) | 0;
+      const depth = .7 * TU.Utils.FastMath.fastSqrt(depthSq) | 0;
       for (let dy = -2; depth > dy; dy++) {
         const y = groundY + dy;
         y >= 0 && y < this.h && (tiles[x][y] = BLOCK.AIR);
@@ -13955,7 +13959,7 @@ class WorldGenerator {
       if (0 > x || x >= this.w) continue;
       const heightSq = innerRadiusSq - dx * dx;
       if (0 > heightSq) continue;
-      const meteoriteHeight = .5 * Math.sqrt(heightSq) | 0;
+      const meteoriteHeight = .5 * TU.Utils.FastMath.fastSqrt(heightSq) | 0;
       for (let dy = 0; meteoriteHeight > dy; dy++) {
         const y = groundY + craterHalf - dy;
         y >= 0 && y < this.h && this._rng() > .15 && (tiles[x][y] = BLOCK.METEORITE);
@@ -14397,13 +14401,11 @@ class WorldGenerator {
       maxQueue = Math.min(w * h * 12, 2e6),
       srcLen = srcX.length,
       initQueue = Utils.clamp(16 * srcLen, 32768, maxQueue);
-    (!this._lightQx || this._lightQx.length < initQueue) && (this._lightQx = new Int32Array(initQueue));
-    (!this._lightQy || this._lightQy.length < initQueue) && (this._lightQy = new Int32Array(initQueue));
+    (!this._lightQ || this._lightQ.length < initQueue) && (this._lightQ = new Int32Array(initQueue));
     (!this._lightQl || this._lightQl.length < initQueue) && (this._lightQl = new Int32Array(initQueue));
-    let qx = this._lightQx,
-      qy = this._lightQy,
+    let qXY = this._lightQ,
       ql = this._lightQl,
-      queueCap = qx.length;
+      queueCap = qXY.length;
     this._blockLightBest && this._blockLightBest.length === w * h ? this._blockLightBest.fill(0) : this._blockLightBest = new Uint8Array(w * h);
     const best = this._blockLightBest;
     if (!this._lightDecayLUT) {
@@ -14419,17 +14421,15 @@ class WorldGenerator {
       let nextCap = queueCap;
       for (; tail + extraNeeded > nextCap && maxQueue > nextCap;) nextCap = Math.min(maxQueue, nextCap + (nextCap >> 1));
       if (queueCap >= nextCap) return !1;
-      const nextQx = new Int32Array(nextCap),
-        nextQy = new Int32Array(nextCap),
+      const nextQXY = new Int32Array(nextCap),
         nextQl = new Int32Array(nextCap);
-      return nextQx.set(qx.subarray(0, tail)), nextQy.set(qy.subarray(0, tail)), nextQl.set(ql.subarray(0, tail)), this._lightQx = qx = nextQx, this._lightQy = qy = nextQy, this._lightQl = ql = nextQl, queueCap = nextCap, !0;
+      return nextQXY.set(qXY.subarray(0, tail)), nextQl.set(ql.subarray(0, tail)), this._lightQ = qXY = nextQXY, this._lightQl = ql = nextQl, queueCap = nextCap, !0;
     };
     for (let i = 0; srcLen > i; i++) {
       const lv = 0 | srcL[i];
       if (lv > 0) {
         if (!ensureQueueCapacity(1)) break;
-        qx[tail] = srcX[i];
-        qy[tail] = srcY[i];
+        qXY[tail] = (srcX[i] << 16) | (srcY[i] & 65535);
         ql[tail] = lv << 1;
         tail++;
       }
@@ -14437,8 +14437,9 @@ class WorldGenerator {
     const w1 = w - 1,
       h1 = h - 1;
     for (; tail > head;) {
-      const x = qx[head],
-        y = qy[head],
+      const xy = qXY[head],
+        x = xy >>> 16 & 65535,
+        y = 65535 & xy,
         l = ql[head];
       if (head++, 0 >= l) continue;
       const idx = x + y * w;
@@ -14459,47 +14460,47 @@ class WorldGenerator {
         if (x > 0) {
           const nx = x - 1,
             col = light[nx];
-          lvOrth > (0 | col[y]) && (col[y] = lvOrth, qx[tail] = nx, qy[tail] = y, ql[tail] = nlOrth, tail++);
+          lvOrth > (0 | col[y]) && (col[y] = lvOrth, qXY[tail] = (nx << 16) | (y & 65535), ql[tail] = nlOrth, tail++);
         }
         if (w1 > x) {
           const nx = x + 1,
             col = light[nx];
-          lvOrth > (0 | col[y]) && (col[y] = lvOrth, qx[tail] = nx, qy[tail] = y, ql[tail] = nlOrth, tail++);
+          lvOrth > (0 | col[y]) && (col[y] = lvOrth, qXY[tail] = (nx << 16) | (y & 65535), ql[tail] = nlOrth, tail++);
         }
         if (y > 0) {
           const ny = y - 1,
             col = light[x];
-          lvOrth > (0 | col[ny]) && (col[ny] = lvOrth, qx[tail] = x, qy[tail] = ny, ql[tail] = nlOrth, tail++);
+          lvOrth > (0 | col[ny]) && (col[ny] = lvOrth, qXY[tail] = (x << 16) | (ny & 65535), ql[tail] = nlOrth, tail++);
         }
         if (h1 > y) {
           const ny = y + 1,
             col = light[x];
-          lvOrth > (0 | col[ny]) && (col[ny] = lvOrth, qx[tail] = x, qy[tail] = ny, ql[tail] = nlOrth, tail++);
+          lvOrth > (0 | col[ny]) && (col[ny] = lvOrth, qXY[tail] = (x << 16) | (ny & 65535), ql[tail] = nlOrth, tail++);
         }
         if (canDiag) {
           if (x > 0 && y > 0) {
             const nx = x - 1,
               ny = y - 1,
               col = light[nx];
-            lvDiag > (0 | col[ny]) && (col[ny] = lvDiag, qx[tail] = nx, qy[tail] = ny, ql[tail] = nlDiag, tail++);
+            lvDiag > (0 | col[ny]) && (col[ny] = lvDiag, qXY[tail] = (nx << 16) | (ny & 65535), ql[tail] = nlDiag, tail++);
           }
           if (w1 > x && y > 0) {
             const nx = x + 1,
               ny = y - 1,
               col = light[nx];
-            lvDiag > (0 | col[ny]) && (col[ny] = lvDiag, qx[tail] = nx, qy[tail] = ny, ql[tail] = nlDiag, tail++);
+            lvDiag > (0 | col[ny]) && (col[ny] = lvDiag, qXY[tail] = (nx << 16) | (ny & 65535), ql[tail] = nlDiag, tail++);
           }
           if (x > 0 && h1 > y) {
             const nx = x - 1,
               ny = y + 1,
               col = light[nx];
-            lvDiag > (0 | col[ny]) && (col[ny] = lvDiag, qx[tail] = nx, qy[tail] = ny, ql[tail] = nlDiag, tail++);
+            lvDiag > (0 | col[ny]) && (col[ny] = lvDiag, qXY[tail] = (nx << 16) | (ny & 65535), ql[tail] = nlDiag, tail++);
           }
           if (w1 > x && h1 > y) {
             const nx = x + 1,
               ny = y + 1,
               col = light[nx];
-            lvDiag > (0 | col[ny]) && (col[ny] = lvDiag, qx[tail] = nx, qy[tail] = ny, ql[tail] = nlDiag, tail++);
+            lvDiag > (0 | col[ny]) && (col[ny] = lvDiag, qXY[tail] = (nx << 16) | (ny & 65535), ql[tail] = nlDiag, tail++);
           }
         }
       }
@@ -15245,7 +15246,7 @@ class DroppedItem {
         dy = playerCy - (this.y + halfH),
         distSq = dx * dx + dy * dy;
       if (distSq < this.magnetRangeSq && distSq > 1e-6) {
-        const invSqrt = Utils.fastInvSqrt ? Utils.fastInvSqrt(distSq) : 1 / Math.sqrt(distSq),
+        const invSqrt = Utils.fastInvSqrt ? Utils.fastInvSqrt(distSq) : 1 / TU.Utils.FastMath.fastSqrt(distSq),
           force = 1.5 * (1 - distSq * invSqrt / this.magnetRange);
         this.vx += dx * invSqrt * force;
         this.vy += dy * invSqrt * force;
@@ -16495,6 +16496,16 @@ class Player {
       vYOffset = this._visualYOffset || 0,
       sx = (0 | this.x) - camPxX,
       sy = (this.y + vYOffset | 0) - camPxY;
+      
+    // OPTIMIZED: Frustum Culling
+    const viewW = ctx.canvas ? ctx.canvas.width : window.innerWidth;
+    const viewH = ctx.canvas ? ctx.canvas.height : window.innerHeight;
+    const cullPadding = 64; // Padding for shadows, weapons, and particle effects
+    if (sx + this.w < -cullPadding || sx > viewW + cullPadding || 
+        sy + this.h < -cullPadding || sy > viewH + cullPadding) {
+      return;
+    }
+
     if (ctx.save(), ctx.translate(sx + .5 * this.w, sy + .5 * this.h), ctx.imageSmoothingEnabled = !1,
     // Flip sprite horizontally when facing left
     this.facingRight || ctx.scale(-1, 1), this._sprintLeanMs > 0 && this.grounded) {
@@ -16819,7 +16830,7 @@ class TouchController {
       dy = ty - this.joystick.startY;
     const size = window.AppServices.get("settings")?.joystickSize || 140,
       maxDist = Math.max(34, .33 * size),
-      dist = Math.sqrt(dx * dx + dy * dy);
+      dist = TU.Utils.FastMath.fastSqrt(dx * dx + dy * dy);
     dist > maxDist && (dx = dx / dist * maxDist, dy = dy / dist * maxDist);
     // Normalize input: map joystick displacement to [-1, 1] range for consistent sensitivity
     let nx = dx / maxDist,
@@ -16827,7 +16838,7 @@ class TouchController {
     // Dead zone + sensitivity curve (square/cubic etc.)
     const dz = "number" == typeof window.AppServices.get("game")?.settings?.joystickDeadzone ? (window.AppServices.get("game")).settings.joystickDeadzone : .14,
       curve = "number" == typeof window.AppServices.get("game")?.settings?.joystickCurve ? (window.AppServices.get("game")).settings.joystickCurve : 2.2;
-    let mag = Math.sqrt(nx * nx + ny * ny);
+    let mag = TU.Utils.FastMath.fastSqrt(nx * nx + ny * ny);
     if (dz > mag) nx = 0, ny = 0, dx = 0, dy = 0;else {
       const t = (mag - dz) / (1 - dz),
         eased = Math.pow(Utils.clamp(t, 0, 1), curve),
@@ -16839,7 +16850,17 @@ class TouchController {
     }
     this.joystick.dx = nx;
     this.joystick.dy = ny;
-    thumbEl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    if (!this._thumbRaf) {
+      this._pendingDx = dx;
+      this._pendingDy = dy;
+      this._thumbRaf = requestAnimationFrame(() => {
+        thumbEl.style.transform = `translate(calc(-50% + ${this._pendingDx}px), calc(-50% + ${this._pendingDy}px))`;
+        this._thumbRaf = null;
+      });
+    } else {
+      this._pendingDx = dx;
+      this._pendingDy = dy;
+    }
   }
   _updateCrosshair(clientX, clientY, el) {
     try {
@@ -16855,8 +16876,18 @@ class TouchController {
       this.crosshair.x = clientX;
       this.crosshair.y = clientY;
     }
-    el.style.left = clientX - 20 + "px";
-    el.style.top = clientY - 20 + "px";
+    if (!this._crossRaf) {
+      this._pendingCx = clientX;
+      this._pendingCy = clientY;
+      this._crossRaf = requestAnimationFrame(() => {
+        el.style.left = this._pendingCx - 20 + "px";
+        el.style.top = this._pendingCy - 20 + "px";
+        this._crossRaf = null;
+      });
+    } else {
+      this._pendingCx = clientX;
+      this._pendingCy = clientY;
+    }
   }
   _setupButton(id, action) {
     const btn = document.getElementById(id);
@@ -17775,7 +17806,7 @@ class ChunkManager {
       instantVelY = (player.y - state.lastY) / dtSec,
       accelX = instantVelX - state.lastVelX,
       accelY = instantVelY - state.lastVelY,
-      accelMag = Math.sqrt(accelX * accelX + accelY * accelY),
+      accelMag = TU.Utils.FastMath.fastSqrt(accelX * accelX + accelY * accelY),
       rawJerkX = (accelX - state.lastAccelX) / dtSec,
       rawJerkY = (accelY - state.lastAccelY) / dtSec;
     state.jerkX = .55 * state.jerkX + .45 * rawJerkX;
@@ -17791,7 +17822,7 @@ class ChunkManager {
     state.velY = state.velY * (1 - alpha) + instantVelY * alpha;
     state.velocitySmooth.x = .7 * state.velocitySmooth.x + .3 * state.velX;
     state.velocitySmooth.y = .7 * state.velocitySmooth.y + .3 * state.velY;
-    state.speed = Math.sqrt(state.velX * state.velX + state.velY * state.velY);
+    state.speed = TU.Utils.FastMath.fastSqrt(state.velX * state.velX + state.velY * state.velY);
     state.speedHistory[state.speedIdx] = state.speed;
     state.speedIdx = (state.speedIdx + 1) % 32;
     let speedSum = 0,
@@ -17799,13 +17830,12 @@ class ChunkManager {
     for (let i = 0; 32 > i; i++) speedSum += state.speedHistory[i], state.speedHistory[i] > maxSpeed && (maxSpeed = state.speedHistory[i]);
     state.avgSpeed = .03125 * speedSum;
     state.peakSpeed = maxSpeed;
-    state.recentPositions[state.recentPosIdx] = {
-      x: player.x,
-      y: player.y,
-      t: now
-    };
+    const rp = state.recentPositions[state.recentPosIdx];
+    rp.x = player.x;
+    rp.y = player.y;
+    rp.t = now;
     state.recentPosIdx = (state.recentPosIdx + 1) % 8;
-    const velDiff = Math.sqrt((instantVelX - state.velX) * (instantVelX - state.velX) + (instantVelY - state.velY) * (instantVelY - state.velY));
+    const velDiff = TU.Utils.FastMath.fastSqrt((instantVelX - state.velX) * (instantVelX - state.velX) + (instantVelY - state.velY) * (instantVelY - state.velY));
     if (state.velocityVariance = .82 * state.velocityVariance + .18 * velDiff, void 0 !== player.grounded) {
       const wasGrounded = state.groundContact;
       state.groundContact = player.grounded;
@@ -17822,16 +17852,19 @@ class ChunkManager {
       state.lastDirection.y = state.direction.y;
       state.direction.x = .75 * state.direction.x + .25 * newDirX;
       state.direction.y = .75 * state.direction.y + .25 * newDirY;
-      const dirMag = Math.sqrt(state.direction.x * state.direction.x + state.direction.y * state.direction.y);
-      dirMag > .01 && (state.direction.x /= dirMag, state.direction.y /= dirMag);
+      const dirMagSq = state.direction.x * state.direction.x + state.direction.y * state.direction.y;
+      if (dirMagSq > 0.0001) {
+        const invMag = TU.Utils.FastMath.fastInvSqrt(dirMagSq);
+        state.direction.x *= invMag;
+        state.direction.y *= invMag;
+      }
       const histIdx = this._loadState.dirIdx;
-      this._loadState.directionHistory[histIdx] = {
-        x: state.direction.x,
-        y: state.direction.y,
-        t: now,
-        vx: state.velX,
-        vy: state.velY
-      };
+      const dh = this._loadState.directionHistory[histIdx];
+      dh.x = state.direction.x;
+      dh.y = state.direction.y;
+      dh.t = now;
+      dh.vx = state.velX;
+      dh.vy = state.velY;
       this._loadState.dirIdx = (histIdx + 1) % 32;
       state.trajectoryPoints.push({
         x: player.x,
@@ -17954,9 +17987,10 @@ class ChunkManager {
     // Simple A* approximation for return path
     const dx = state.homeChunk.x - playerChunkX,
       dy = state.homeChunk.y - playerChunkY,
-      dist = Math.sqrt(dx * dx + dy * dy);
-    if (3 > dist) return void (state.returnPath = []);
+      distSq = dx * dx + dy * dy;
+    if (9 > distSq) return void (state.returnPath = []);
     state.returnPath = [];
+    const dist = TU.Utils.FastMath.fastSqrt(distSq);
     const steps = Math.min(10, Math.floor(dist + 1)),
       stepX = dx / steps,
       stepY = dy / steps;
@@ -17987,8 +18021,9 @@ class ChunkManager {
       intentStrength += velWeight;
     }
     if (0 !== state.accelX || 0 !== state.accelY) {
-      const accelMag = Math.sqrt(state.accelX * state.accelX + state.accelY * state.accelY);
-      if (accelMag > 20) {
+      const accelMagSq = state.accelX * state.accelX + state.accelY * state.accelY;
+      if (accelMagSq > 400) {
+        const accelMag = TU.Utils.FastMath.fastSqrt(accelMagSq);
         const accelWeight = Math.min(.8, accelMag / 200);
         intentX += state.accelX / accelMag * accelWeight;
         intentY += state.accelY / accelMag * accelWeight;
@@ -17998,8 +18033,12 @@ class ChunkManager {
     if (state.jumpState && !state.groundContact && (intentY += .3, intentStrength += .3), intentStrength > .1) {
       state.intentDirection.x = .7 * state.intentDirection.x + intentX / intentStrength * .3;
       state.intentDirection.y = .7 * state.intentDirection.y + intentY / intentStrength * .3;
-      const intentMag = Math.sqrt(state.intentDirection.x * state.intentDirection.x + state.intentDirection.y * state.intentDirection.y);
-      intentMag > .01 && (state.intentDirection.x /= intentMag, state.intentDirection.y /= intentMag);
+      const intentMagSq = state.intentDirection.x * state.intentDirection.x + state.intentDirection.y * state.intentDirection.y;
+      if (intentMagSq > 0.0001) {
+        const invMag = TU.Utils.FastMath.fastInvSqrt(intentMagSq);
+        state.intentDirection.x *= invMag;
+        state.intentDirection.y *= invMag;
+      }
     }
     state.intentScore = Math.min(1, intentStrength * state.directionStability);
   }
@@ -18035,7 +18074,7 @@ class ChunkManager {
         vy = newVy;
       }
       if (intentWeight > .1 && i > 2 && 12 > i) {
-        const speedMag = Math.sqrt(vx * vx + vy * vy);
+        const speedMag = TU.Utils.FastMath.fastSqrt(vx * vx + vy * vy);
         if (speedMag > 20) {
           const blendFactor = .18 * intentWeight;
           vx = vx * (1 - blendFactor) + intentX * speedMag * blendFactor;
@@ -18057,7 +18096,7 @@ class ChunkManager {
         confidence: stepConfidence,
         vx: vx,
         vy: vy,
-        intentAligned: Math.abs(intentX * (vx / (Math.sqrt(vx * vx + vy * vy) + .01)) + intentY * (vy / (Math.sqrt(vx * vx + vy * vy) + .01))) > .65
+        intentAligned: Math.abs(intentX * (vx * TU.Utils.FastMath.fastInvSqrt(vx * vx + vy * vy + .0001)) + intentY * (vy * TU.Utils.FastMath.fastInvSqrt(vx * vx + vy * vy + .0001))) > .65
       });
       state.predictedChunks.add(key);
     }
@@ -18120,7 +18159,7 @@ class ChunkManager {
     if (4 > count) return state.movementPattern = "stationary", void (state.patternConfidence = 0);
     avgX /= count;
     avgY /= count;
-    const avgMag = Math.sqrt(avgX * avgX + avgY * avgY);
+    const avgMag = TU.Utils.FastMath.fastSqrt(avgX * avgX + avgY * avgY);
     if (.25 > avgMag) return state.movementPattern = "erratic", void (state.patternConfidence = avgMag);
     let dotSum = 0;
     for (let i = 0; 16 > i; i++) {
@@ -18214,19 +18253,20 @@ class ChunkManager {
         5 > predDist && (priority -= (5 - predDist) * prediction.confidence * .8);
       }
     }
-    const accelMag = Math.sqrt(state.accelX * state.accelX + state.accelY * state.accelY);
+    const accelMag = TU.Utils.FastMath.fastSqrt(state.accelX * state.accelX + state.accelY * state.accelY);
     if (accelMag > 25) {
       const accelBias = rx * (state.accelX / (accelMag + 1)) + ry * (state.accelY / (accelMag + 1));
       accelBias > 0 && (priority -= .5 * accelBias);
     }
-    playerState.jerkX * playerState.jerkX + playerState.jerkY * playerState.jerkY > 14400 && (priority = .55 * Math.sqrt(distSq) + .45 * priority);
+    const distManhattan = (0 > rx ? -rx : rx) + (0 > ry ? -ry : ry);
+    playerState.jerkX * playerState.jerkX + playerState.jerkY * playerState.jerkY > 14400 && (priority = .55 * distManhattan + .45 * priority);
     const heatmapKey = `${playerChunkX + rx},${playerChunkY + ry}`,
       heatmapEntry = state.heatmap.get(heatmapKey);
     if (heatmapEntry && heatmapEntry.count > 2 && (priority -= Math.min(2.5, .18 * heatmapEntry.count)), playerState.directionStability > .65) {
       const stableDirBonus = rx * playerState.direction.x + ry * playerState.direction.y;
       stableDirBonus > 0 && (priority -= .5 * stableDirBonus * playerState.directionStability);
     }
-    if (playerState.turnRate > .8 && (priority = .75 * priority + .25 * Math.sqrt(distSq)), playerState.jumpState && (ry > 0 && (priority -= .7), playerState.intentDirection.y > .3 && ry > 0 && (priority -= 1)), playerState.intentScore > .4) {
+    if (playerState.turnRate > .8 && (priority = .75 * priority + .25 * distManhattan), playerState.jumpState && (ry > 0 && (priority -= .7), playerState.intentDirection.y > .3 && ry > 0 && (priority -= 1)), playerState.intentScore > .4) {
       const intentBias = rx * playerState.intentDirection.x + ry * playerState.intentDirection.y;
       intentBias > 0 && (priority -= intentBias * playerState.intentScore * 2);
     }
@@ -18532,11 +18572,12 @@ class ChunkManager {
       const key = this.chunkKey(cx, cy);
       if (generatedChunks.has(key) || seen.has(key)) continue;
       const intentBonus = playerState.intentScore > .4 ? (rx * intentX + ry * intentY) * playerState.intentScore * 1.5 : 0;
+      const distManhattan = (0 > rx ? -rx : rx) + (0 > ry ? -ry : ry);
       preloadChunks.push({
         cx: cx,
         cy: cy,
         key: key,
-        priority: 7 + Math.sqrt(distSq) - .5 * dotProduct - intentBonus,
+        priority: 7 + distManhattan - .5 * dotProduct - intentBonus,
         predictive: !0,
         preload: !0,
         confidence: Math.min(1, .8 * dotProduct + .2 * playerState.directionStability)
@@ -22323,6 +22364,7 @@ class UIManager {
         this._hotbarCtx[i] = cx;
         this._hotbarCountEls[i] = count;
       }
+      this._hotbarLastCount = this._hotbarLastCount || new Int32Array(9).fill(-1);
     }
     for (let i = 0; 9 > i; i++) {
       const item = window.Player.get().inventory[i],
@@ -22331,23 +22373,53 @@ class UIManager {
         cx = this._hotbarCtx[i],
         countEl = this._hotbarCountEls[i],
         pickaxeIcon = slot._pickaxeIcon;
-      // Empty slots yield undefined; null-check before property access
-      slot.classList.toggle("active", i === window.Player.get().selectedSlot);
+      
+      const isActive = i === window.Player.get().selectedSlot;
+      if (slot._lastActive !== isActive) {
+        slot.classList.toggle("active", isActive);
+        slot._lastActive = isActive;
+      }
+      
       const empty = !item || 0 === item.count && "pickaxe" !== item.id;
-      if (slot.classList.toggle("empty", empty), item && 0 !== item.count) {
+      if (slot._lastEmpty !== empty) {
+        slot.classList.toggle("empty", empty);
+        slot._lastEmpty = empty;
+      }
+
+      if (item && 0 !== item.count) {
         if ("pickaxe" !== item.id) {
-          if (
-          // Standard item rendering (non-pickaxe uses canvas texture)
-          // Standard item rendering (non-pickaxe uses canvas texture)
-          pickaxeIcon.style.display = "none", canvas.style.display = "", this._hotbarLastId[i] !== item.id) {
+          if (pickaxeIcon.style.display !== "none") pickaxeIcon.style.display = "none";
+          if (canvas.style.display !== "") canvas.style.display = "";
+          if (this._hotbarLastId[i] !== item.id) {
             cx.clearRect(0, 0, 32, 32);
             const tex = this.textures && this.textures.get ? this.textures.get(item.id) : null;
             tex && cx.drawImage(tex, 0, 0, 32, 32);
             this._hotbarLastId[i] = item.id;
           }
-          1 > item.count ? countEl.style.display = "none" : (countEl.textContent = item.count + "", countEl.style.display = "");
-        } else pickaxeIcon.style.display = "", canvas.style.display = "none", countEl.style.display = "none", this._hotbarLastId[i] = "pickaxe";
-      } else pickaxeIcon.style.display = "none", canvas.style.display = "none", countEl.style.display = "none", this._hotbarLastId[i] = null;
+          if (1 > item.count) {
+            if (countEl.style.display !== "none") countEl.style.display = "none";
+            this._hotbarLastCount[i] = -1;
+          } else {
+            if (this._hotbarLastCount[i] !== item.count) {
+              countEl.textContent = item.count + "";
+              this._hotbarLastCount[i] = item.count;
+            }
+            if (countEl.style.display !== "") countEl.style.display = "";
+          }
+        } else {
+          if (pickaxeIcon.style.display !== "") pickaxeIcon.style.display = "";
+          if (canvas.style.display !== "none") canvas.style.display = "none";
+          if (countEl.style.display !== "none") countEl.style.display = "none";
+          this._hotbarLastId[i] = "pickaxe";
+          this._hotbarLastCount[i] = -1;
+        }
+      } else {
+        if (pickaxeIcon.style.display !== "none") pickaxeIcon.style.display = "none";
+        if (canvas.style.display !== "none") canvas.style.display = "none";
+        if (countEl.style.display !== "none") countEl.style.display = "none";
+        this._hotbarLastId[i] = null;
+        this._hotbarLastCount[i] = -1;
+      }
     }
     this._updateItemHint(!1);
   }
@@ -24003,8 +24075,7 @@ class Game {
     };
     this._lightVisited = null;
     this._lightVisitMark = 1;
-    this._lightQx = [];
-    this._lightQy = [];
+    this._lightQ = [];
     this._lightQl = [];
     this._latestTouchInput = null;
     // Placement throttling: prevents multiple placements per frame from mobile long-press
@@ -25836,10 +25907,9 @@ class Game {
     maxQueueSize = 1 << Math.log2(maxQueueSize) + .9999;
     // Ring buffer: reuse pre-allocated arrays with head/tail pointers for O(1) ops
     // Always use the existing buffer size if larger, but recalculate mask
-    (!this._lightQx || this._lightQx.length < maxQueueSize) && (this._lightQx = new Int32Array(maxQueueSize), this._lightQy = new Int32Array(maxQueueSize), this._lightQl = new Int32Array(maxQueueSize)); // Always update ringMask to match actual buffer size (not requested size)
-    const ringMask = this._lightQx.length - 1,
-      qx = this._lightQx,
-      qy = this._lightQy,
+    (!this._lightQ || this._lightQ.length < maxQueueSize) && (this._lightQ = new Int32Array(maxQueueSize), this._lightQl = new Int32Array(maxQueueSize)); // Always update ringMask to match actual buffer size (not requested size)
+    const ringMask = this._lightQ.length - 1,
+      qXY = this._lightQ,
       ql = this._lightQl;
     let qHead = 0,
       qTail = 0;
@@ -25873,8 +25943,7 @@ class Game {
               v = sun > bl ? sun : bl;
             if (lf[idx] = v, v > 0 && maxQueueSize > qTail - qHead) {
               const pos = qTail & ringMask;
-              qx[pos] = tx;
-              qy[pos] = ty;
+              qXY[pos] = (tx << 16) | (ty & 65535);
               ql[pos] = v << 1;
               qTail++;
             }
@@ -26666,15 +26735,34 @@ window.TU;
         dist > maxDist && (dx = dx / dist * maxDist, dy = dy / dist * maxDist);
         this.joystick.dx = dx / maxDist;
         this.joystick.dy = dy / maxDist;
-        thumbEl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+        if (!this._thumbRaf) {
+          this._pendingDx = dx;
+          this._pendingDy = dy;
+          this._thumbRaf = requestAnimationFrame(() => {
+            thumbEl.style.transform = `translate(calc(-50% + ${this._pendingDx}px), calc(-50% + ${this._pendingDy}px))`;
+            this._thumbRaf = null;
+          });
+        } else {
+          this._pendingDx = dx;
+          this._pendingDy = dy;
+        }
       },
       // Crosshair: coordinate update only (compatible with original logic)
       TouchController.prototype._updateCrosshair = function (x, y, el) {
         this.crosshair.x = x;
         this.crosshair.y = y;
-        // Center 40x40 crosshair element on touch point
-        el.style.left = x - 20 + "px";
-        el.style.top = y - 20 + "px";
+        if (!this._crossRaf) {
+          this._pendingCx = x;
+          this._pendingCy = y;
+          this._crossRaf = requestAnimationFrame(() => {
+            el.style.left = this._pendingCx - 20 + "px";
+            el.style.top = this._pendingCy - 20 + "px";
+            this._crossRaf = null;
+          });
+        } else {
+          this._pendingCx = x;
+          this._pendingCy = y;
+        }
       }), Renderer && Renderer.prototype) {
         const origResize = Renderer.prototype.resize;
         Renderer.prototype.resize = function () {
@@ -28024,10 +28112,12 @@ window.TU;
         water = new Uint8Array(N);
       for (let i = 0; N > i; i++) tiles[i] === WATER && (water[i] = 8);
       const waterMark = new Uint8Array(N),
-        waterQ = [],
-        logicMark = new Uint8Array(N),
-        logicQ = [],
-        region = {
+        waterQ = new Uint32Array(65536);
+      let waterTail = 0;
+      const logicMark = new Uint8Array(N),
+        logicQ = new Uint32Array(65536);
+      let logicTail = 0;
+      const region = {
           x0: 0,
           y0: 0,
           x1: -1,
@@ -28043,13 +28133,13 @@ window.TU;
         },
         idx = (x, y) => x * this.h + y,
         scheduleWater = i => {
-          inRegionIndex(i) && (waterMark[i] || (waterMark[i] = 1, waterQ.push(i)));
+          inRegionIndex(i) && (waterMark[i] || (waterMark[i] = 1, waterTail < 65536 && (waterQ[waterTail++] = i)));
         },
         scheduleWaterAround = (x, y) => {
           0 > x || 0 > y || x >= this.w || y >= this.h || (scheduleWater(idx(x, y)), x > 0 && scheduleWater(idx(x - 1, y)), x + 1 < this.w && scheduleWater(idx(x + 1, y)), y > 0 && scheduleWater(idx(x, y - 1)), y + 1 < this.h && scheduleWater(idx(x, y + 1)));
         },
         scheduleLogic = i => {
-          inRegionIndex(i) && (logicMark[i] || (logicMark[i] = 1, logicQ.push(i)));
+          inRegionIndex(i) && (logicMark[i] || (logicMark[i] = 1, logicTail < 65536 && (logicQ[logicTail++] = i)));
         },
         scheduleLogicAround = (x, y) => {
           0 > x || 0 > y || x >= this.w || y >= this.h || (scheduleLogic(idx(x, y)), x > 0 && scheduleLogic(idx(x - 1, y)), x + 1 < this.w && scheduleLogic(idx(x + 1, y)), y > 0 && scheduleLogic(idx(x, y - 1)), y + 1 < this.h && scheduleLogic(idx(x, y + 1)));
@@ -28295,8 +28385,8 @@ window.TU;
               scheduleWaterAround(nx, ny);
               scheduleLogicAround(nx, ny);
             }
-            waterMark[n] || (waterMark[n] = 1, waterQ.push(n));
-            waterMark[i] || (waterMark[i] = 1, waterQ.push(i));
+            waterMark[n] || (waterMark[n] = 1, waterTail < 65536 && (waterQ[waterTail++] = n));
+            waterMark[i] || (waterMark[i] = 1, waterTail < 65536 && (waterQ[waterTail++] = i));
           };
           x > 0 && flowSideInlined(i - this.h);
           x + 1 < this.w && flowSideInlined(i + this.h);
@@ -28331,14 +28421,14 @@ window.TU;
         changes.length = 0;
         const waterBudget = "low" === st.perfLevel ? 220 : 520;
         let ops = 0;
-        for (; waterBudget > ops && st.waterQ.length && (deadline.timeRemaining() > 1 || deadline.didTimeout);) {
-          const i = st.waterQ.pop();
+        for (; waterBudget > ops && waterTail > 0 && (deadline.timeRemaining() > 1 || deadline.didTimeout);) {
+          const i = waterQ[--waterTail];
           st.waterTick(i, changes);
           ops++;
         }
         let lops = 0;
-        for (; 1 > lops && st.logicQ.length && (deadline.timeRemaining() > 1 || deadline.didTimeout);) {
-          const i = st.logicQ.pop();
+        for (; 1 > lops && logicTail > 0 && (deadline.timeRemaining() > 1 || deadline.didTimeout);) {
+          const i = logicQ[--logicTail];
           st.logicRecomputeFromSeed(i, changes);
           lops++;
         }
@@ -28588,7 +28678,7 @@ window.TU;
       this.pending.length > (0 | this._pendingHead) && this._scheduleApply();
     }
     static _workerSource() {
-      return "/* TileLogic Worker */\n(() => {\n  let W = 0, H = 0;\n  let tiles = null;\n  let water = null;\n\n  let AIR = 0, WATER = 27;\n  let IDS = null;\n\n  const region = { x0: 0, y0: 0, x1: -1, y1: -1, set: false };\n  let lastRegionKey = '';\n  let perfLevel = 'high';\n  const MAX = 8;\n\n  const waterQ = [];\n  let waterMark = null;\n  const logicQ = [];\n  let logicMark = null;\n  const logicNetState = { version: 1, byConductor: new Map() };\n  let machineVersion = 1;\nfunction scheduleLogic(i) {\n    if (!logicMark) return;\n    if (!inRegionIndex(i)) return;\n    if (logicMark[i]) return;\n    logicMark[i] = 1;\n    logicQ.push(i);\n  }\n\n  function scheduleLogicAround(x, y) {\n    if (x < 0 || y < 0 || x >= W || y >= H) return;\n    scheduleLogic(idx(x, y));\n    if (x > 0) scheduleLogic(idx(x - 1, y));\n    if (x + 1 < W) scheduleLogic(idx(x + 1, y));\n    if (y > 0) scheduleLogic(idx(x, y - 1));\n    if (y + 1 < H) scheduleLogic(idx(x, y + 1));\n  }\n\n  function setTile(i, newId, changes) {\n    const old = tiles[i];\n    if (old === newId) return false;\n    tiles[i] = newId;\n    changes.push(i, old, newId);\n    const x = (i / H) | 0;\n    const y = i - x * H;\n    scheduleWaterAround(x, y);\n    scheduleLogicAround(x, y);\n    return true;\n  }\n\n  function ensureWaterTile(i, changes) {\n    if (water[i] > 0) {\n      if (tiles[i] !== WATER) setTile(i, WATER, changes);\n    } else {\n      if (tiles[i] === WATER) setTile(i, AIR, changes);\n    }\n  }\n\n  function isWire(id) { return IDS && (id === IDS.WIRE_OFF || id === IDS.WIRE_ON); }\n  function isSwitch(id) { return IDS && (id === IDS.SWITCH_OFF || id === IDS.SWITCH_ON || id === IDS.PLATE_OFF || id === IDS.PLATE_ON); }\n  function isSource(id) { return IDS && (id === IDS.SWITCH_ON || id === IDS.PLATE_ON); }\n  function isLamp(id) { return IDS && (id === IDS.LAMP_OFF || id === IDS.LAMP_ON); }\n  function isPump(id) { return IDS && (id === IDS.PUMP_IN || id === IDS.PUMP_OUT); }\n  function isPumpTopologyTile(id) { return isPump(id); } // Unified naming\n  function isConductor(id) { return isWire(id) || isSwitch(id) || isPump(id); }\n  function canWaterEnterTile(id) { return id === AIR || id === WATER; }\n\n  function idx(x, y) { return x * H + y; }\n\n  function inRegionIndex(i) {\n    if (!region.set) return false;\n    const x = (i / H) | 0;\n    const y = i - x * H;\n    return (x >= region.x0 && x <= region.x1 && y >= region.y0 && y <= region.y1);\n  }\n\n  function scheduleWater(i) {\n      if (!inRegionIndex(i)) return;\n      if (waterMark[i]) return;\n      waterMark[i] = 1;\n      waterQ.push(i);\n  }\n\n  function scheduleWaterAround(x, y) {\n    if (x < 0 || y < 0 || x >= W || y >= H) return;\n    scheduleWater(idx(x, y));\n    if (x > 0) scheduleWater(idx(x - 1, y));\n    if (x + 1 < W) scheduleWater(idx(x + 1, y));\n    if (y > 0) scheduleWater(idx(x, y - 1));\n    if (y + 1 < H) scheduleWater(idx(x, y + 1));\n  }\n\n  function tryFlow(i, n, a, changes) {\n      const nt = tiles[n];\n      if (!canWaterEnterTile(nt)) return a;\n\n      const nb = water[n] | 0;\n      const diff = a - nb;\n      if (diff <= 1) return a;\n\n      let mv = diff >> 1;\n      if (mv < 1) mv = 1;\n\n      const space = MAX - nb;\n      if (mv > space) mv = space;\n      if (mv <= 0) return a;\n\n      water[i] = a - mv;\n      water[n] = nb + mv;\n      a = a - mv;\n\n      ensureWaterTile(i, changes);\n      ensureWaterTile(n, changes);\n\n      scheduleWater(n);\n      scheduleWater(i);\n      return a;\n  }\n\n  function waterTick(i, changes) {\n    waterMark[i] = 0;\n\n    // Fast region check\n    if (!region.set) return;\n    const x = (i / H) | 0;\n    const y = i - x * H;\n    if (x < region.x0 || x > region.x1 || y < region.y0 || y > region.y1) return;\n\n    let a = water[i] | 0;\n    if (a <= 0) return;\n\n    const tid = tiles[i];\n    if (tid !== WATER && tid !== AIR) { water[i] = 0; return; }\n\n    if (y + 1 < H) {\n      const d = i + 1;\n      const dt = tiles[d];\n      if (canWaterEnterTile(dt)) {\n        const b = water[d] | 0;\n        const space = MAX - b;\n        if (space > 0) {\n          const mv = a < space ? a : space;\n          water[i] = a - mv;\n          water[d] = b + mv;\n          a = water[i] | 0;\n\n          ensureWaterTile(i, changes);\n          ensureWaterTile(d, changes);\n\n          scheduleWater(d);\n          scheduleWater(i);\n          scheduleWaterAround(x, y);\n          scheduleWaterAround(x, y + 1);\n        }\n      }\n    }\n\n    if (a <= 0) return;\n\n    // Sides\n    if (x > 0) a = tryFlow(i, i - H, a, changes);\n    if (a > 0 && x + 1 < W) a = tryFlow(i, i + H, a, changes);\n  }\n\n  let vis = null;\n  let stamp = 1;\n  let lampSeen = null;\n  let lampStamp = 1;\n  const bfsQ = [];\n  const compTmp = [];\n  const lampsTmp = [];\n  const startsTmp = [];\n  let startSeen = null;\n  let startStamp = 1;\n  const touchedCompSet = new Set();\n\n  function invalidateLogicCache(versionHint) {\n    const hint = versionHint | 0;\n    if (hint > 0) logicNetState.version = hint;\n    else logicNetState.version = ((logicNetState.version | 0) + 1) | 0;\n    logicNetState.byConductor.clear();\n  }\n\n  function nextVisStamp() {\n    stamp = (stamp + 1) >>> 0;\n    if (stamp === 0) { stamp = 1; if (vis) vis.fill(0); }\n    return stamp;\n  }\n\n  function nextLampStamp() {\n    lampStamp = (lampStamp + 1) >>> 0;\n    if (lampStamp === 0) { lampStamp = 1; if (lampSeen) lampSeen.fill(0); }\n    return lampStamp;\n  }\n\n  function nextStartStamp() {\n    startStamp = (startStamp + 1) >>> 0;\n    if (startStamp === 0) { startStamp = 1; if (startSeen) startSeen.fill(0); }\n    return startStamp;\n  }\n\n  function ensureVis() {\n    const N = W * H;\n    if (!vis || vis.length !== N) vis = new Uint32Array(N);\n    if (!lampSeen || lampSeen.length !== N) lampSeen = new Uint32Array(N);\n    if (!startSeen || startSeen.length !== N) startSeen = new Uint32Array(N);\n  }\n\n  function isLogicTopologyTile(id) {\n    return isConductor(id) || isLamp(id);\n  }\n\n  function lampShouldOn(iLamp) {\n    const x = (iLamp / H) | 0;\n    const y = iLamp - x * H;\n    if (x > 0) { const t = tiles[iLamp - H]; if (t === IDS.WIRE_ON || t === IDS.SWITCH_ON || t === IDS.PLATE_ON) return true; }\n    if (x + 1 < W) { const t = tiles[iLamp + H]; if (t === IDS.WIRE_ON || t === IDS.SWITCH_ON || t === IDS.PLATE_ON) return true; }\n    if (y > 0) { const t = tiles[iLamp - 1]; if (t === IDS.WIRE_ON || t === IDS.SWITCH_ON || t === IDS.PLATE_ON) return true; }\n    if (y + 1 < H) { const t = tiles[iLamp + 1]; if (t === IDS.WIRE_ON || t === IDS.SWITCH_ON || t === IDS.PLATE_ON) return true; }\n    return false;\n  }\n\n  function updateLampAt(iLamp, changes) {\n    const t = tiles[iLamp];\n    if (!(t === IDS.LAMP_OFF || t === IDS.LAMP_ON)) return;\n    const want = lampShouldOn(iLamp) ? IDS.LAMP_ON : IDS.LAMP_OFF;\n    if (t !== want) setTile(iLamp, want, changes);\n  }\n\n  function collectLogicStarts(seed, changes) {\n    startsTmp.length = 0;\n    ensureVis();\n    const curStartStamp = nextStartStamp();\n    const sid = tiles[seed];\n    if (isConductor(sid)) {\n      startSeen[seed] = curStartStamp;\n      startsTmp.push(seed);\n      return startsTmp;\n    }\n\n    const x = (seed / H) | 0;\n    const y = seed - x * H;\n    const pushIfConductor = (n) => {\n      if (n < 0 || n >= W * H) return;\n      if (!isConductor(tiles[n])) return;\n      if (startSeen[n] === curStartStamp) return;\n      startSeen[n] = curStartStamp;\n      startsTmp.push(n);\n    };\n\n    if (x > 0) pushIfConductor(seed - H);\n    if (x + 1 < W) pushIfConductor(seed + H);\n    if (y > 0) pushIfConductor(seed - 1);\n    if (y + 1 < H) pushIfConductor(seed + 1);\n    if (isLamp(sid)) updateLampAt(seed, changes);\n    return startsTmp;\n  }\n\n  function buildCachedLogicComponent(start) {\n    ensureVis();\n    const curStamp = nextVisStamp();\n\n    bfsQ.length = 0;\n    compTmp.length = 0;\n    let powered = false;\n\n    vis[start] = curStamp;\n    bfsQ.push(start);\n\n    while (bfsQ.length) {\n      const i = bfsQ.pop();\n      const t = tiles[i];\n      if (!isConductor(t)) continue;\n\n      compTmp.push(i);\n      if (isSource(t)) powered = true;\n\n      const x = (i / H) | 0;\n      const y = i - x * H;\n      const push = (n) => {\n        if (n < 0 || n >= W * H) return;\n        if (vis[n] === curStamp) return;\n        if (!isConductor(tiles[n])) return;\n        vis[n] = curStamp;\n        bfsQ.push(n);\n      };\n\n      if (x > 0) push(i - H);\n      if (x + 1 < W) push(i + H);\n      if (y > 0) push(i - 1);\n      if (y + 1 < H) push(i + 1);\n\n      if (compTmp.length > 12000) break;\n    }\n\n    const curLampStamp = nextLampStamp();\n    lampsTmp.length = 0;\n    const markLamp = (n) => {\n      if (n < 0 || n >= W * H) return;\n      if (!isLamp(tiles[n])) return;\n      if (lampSeen[n] === curLampStamp) return;\n      lampSeen[n] = curLampStamp;\n      lampsTmp.push(n);\n    };\n\n    for (let i = 0, len = compTmp.length; i < len; i++) {\n      const p = compTmp[i];\n      const x = (p / H) | 0;\n      const y = p - x * H;\n      if (x > 0) markLamp(p - H);\n      if (x + 1 < W) markLamp(p + H);\n      if (y > 0) markLamp(p - 1);\n      if (y + 1 < H) markLamp(p + 1);\n    }\n\n    const nodes = compTmp.slice(0);\n    const lamps = lampsTmp.length ? lampsTmp.slice(0) : null;\n    const comp = { powered, nodes, lamps };\n    const cache = logicNetState.byConductor;\n    for (let i = 0, len = nodes.length; i < len; i++) cache.set(nodes[i], comp);\n    return comp;\n  }\n\n  function applyCachedLogicComponent(comp, changes) {\n    if (!comp || !comp.nodes || !comp.nodes.length) return 0;\n    const wantWire = comp.powered ? IDS.WIRE_ON : IDS.WIRE_OFF;\n\n    const nodes = comp.nodes;\n    for (let i = 0, len = nodes.length; i < len; i++) {\n      const p = nodes[i];\n      const t = tiles[p];\n      if (isWire(t) && t !== wantWire) setTile(p, wantWire, changes);\n    }\n\n    const lamps = comp.lamps;\n    if (lamps && lamps.length) {\n      for (let i = 0, len = lamps.length; i < len; i++) updateLampAt(lamps[i], changes);\n    }\n\n    return nodes.length;\n  }\n\n  function logicRecomputeFromSeed(seed, changes) {\n    logicMark[seed] = 0;\n    const starts = collectLogicStarts(seed, changes);\n    if (!starts.length) return 0;\n\n    touchedCompSet.clear();\n    let touchedNodes = 0;\n    const cache = logicNetState.byConductor;\n\n    for (let si = 0, slen = starts.length; si < slen; si++) {\n      const s = starts[si];\n      let comp = cache.get(s);\n      if (!comp) comp = buildCachedLogicComponent(s);\n      if (!comp) continue;\n      if (touchedCompSet.has(comp)) continue;\n      touchedCompSet.add(comp);\n      touchedNodes += applyCachedLogicComponent(comp, changes);\n    }\n\n    return touchedNodes;\n  }\n\n  function primeRegionWork() {\n    if (!region.set) return;\n    for (let x = region.x0; x <= region.x1; x++) {\n      const base = x * H;\n      for (let y = region.y0; y <= region.y1; y++) {\n        const i = base + y;\n        if (water[i] > 0) scheduleWater(i);\n        const t = tiles[i];\n        if (t === IDS.SWITCH_ON || t === IDS.PLATE_ON || isWire(t) || isLamp(t) || isPump(t)) scheduleLogic(i);\n      }\n    }\n  }\n\n  function step() {\n    const changes = [];\n\n    const waterBudget = (perfLevel === 'low') ? 350 : 1500;\n    for (let ops = 0; ops < waterBudget && waterQ.length; ops++) {\n      waterTick(waterQ.pop(), changes);\n    }\n\n    const maxLogicTiles = (perfLevel === 'low') ? 2000 : 15000;\n    let logicTiles = 0;\n    while (logicQ.length && logicTiles < maxLogicTiles) {\n      logicTiles += logicRecomputeFromSeed(logicQ.pop(), changes);\n    }\n\n    if (changes.length) {\n      const buf = new Int32Array(changes);\n      postMessage({ type: 'changes', buf: buf.buffer }, [buf.buffer]);\n    }\n\n    const tickMs = (perfLevel === 'low') ? 55 : 30;\n    setTimeout(step, tickMs);\n  }\n\n  onmessage = (e) => {\n    const m = e.data;\n    if (!m || !m.type) return;\n\n    switch (m.type) {\n      case 'init': {\n        W = m.w | 0;\n        H = m.h | 0;\n        IDS = m.ids;\n        AIR = (m.blocks && (m.blocks.AIR | 0) >= 0) ? (m.blocks.AIR | 0) : 0;\n        WATER = (m.blocks && (m.blocks.WATER | 0) >= 0) ? (m.blocks.WATER | 0) : 27;\n\n        tiles = new Uint8Array(m.tiles);\n\n        const N = W * H;\n        water = new Uint8Array(N);\n        waterMark = new Uint8Array(N);\n        logicMark = new Uint8Array(N);\n        ensureVis();\n        invalidateLogicCache(1);\n        machineVersion = 1;\n\n        for (let i = 0; i < N; i++) if (tiles[i] === WATER) water[i] = MAX;\n\n        step();\n        break;\n      }\n\n      case 'tileWrite': {\n        if (!tiles) return;\n        const x = m.x | 0;\n        const y = m.y | 0;\n        if (x < 0 || y < 0 || x >= W || y >= H) return;\n\n        const i = idx(x, y);\n        const newId = m.id | 0;\n        const oldId = tiles[i];\n        tiles[i] = newId;\n\n        const mv = m.mv | 0;\n        if (mv > 0 && mv !== (machineVersion | 0)) {\n          machineVersion = mv;\n          invalidateLogicCache(machineVersion);\n        } else if (isLogicTopologyTile(oldId) || isLogicTopologyTile(newId)) {\n          invalidateLogicCache(0);\n        }\n\n        if (newId === WATER) {\n          water[i] = MAX;\n          scheduleWaterAround(x, y);\n        } else if (oldId === WATER && newId !== WATER) {\n          water[i] = 0;\n          scheduleWaterAround(x, y);\n        }\n\n        scheduleLogicAround(x, y);\n        break;\n      }\n\ncase 'tileWriteBatch': {\n        if (!tiles) return;\n        if (!m.buf) return;\n        const arr = new Int32Array(m.buf);\n        for (let j = 0; j < arr.length; j += 4) {\n          const x = arr[j] | 0;\n        const y = arr[j+1] | 0;\n        if (x < 0 || y < 0 || x >= W || y >= H) continue;\n\n        const i = idx(x, y);\n        const newId = arr[j+2] | 0;\n        const oldId = tiles[i];\n        tiles[i] = newId;\n\n        const mv = arr[j+3] | 0;\n        if (mv > 0 && mv !== (machineVersion | 0)) {\n          machineVersion = mv;\n          invalidateLogicCache(machineVersion);\n        } else if (isLogicTopologyTile(oldId) || isLogicTopologyTile(newId)) {\n          invalidateLogicCache(0);\n        }\n\n        if (newId === WATER) {\n          water[i] = MAX;\n          scheduleWaterAround(x, y);\n        } else if (oldId === WATER && newId !== WATER) {\n          water[i] = 0;\n          scheduleWaterAround(x, y);\n        }\n\n        scheduleLogicAround(x, y);\n        }\n        break;\n      }\n\n      case 'region': {\n        const cx = m.cx | 0, cy = m.cy | 0;\n        const rx = m.rx | 0, ry = m.ry | 0;\n\n        const x0 = Math.max(0, cx - rx);\n        const x1 = Math.min(W - 1, cx + rx);\n        const y0 = Math.max(0, cy - ry);\n        const y1 = Math.min(H - 1, cy + ry);\n\n        const key = (((x0) << 16) | ((y0) & 0xFFFF)) + ',' + (((x1) << 16) | ((y1) & 0xFFFF));\n        if (key !== lastRegionKey) {\n          lastRegionKey = key;\n          region.x0 = x0; region.x1 = x1; region.y0 = y0; region.y1 = y1; region.set = true;\n          primeRegionWork();\n        } else {\n          region.set = true;\n        }\n        break;\n      }\n\n      case 'perf': {\n        perfLevel = m.level || 'high';\n        break;\n      }\n      default: {\n        console.warn('[Worker] Unknown message type: ' + m.type);\n        break;\n      }\n    }\n  };\n})();";
+      return "/* TileLogic Worker */\n(() => {\n  let W = 0, H = 0;\n  let tiles = null;\n  let water = null;\n\n  let AIR = 0, WATER = 27;\n  let IDS = null;\n\n  const region = { x0: 0, y0: 0, x1: -1, y1: -1, set: false };\n  let lastRegionKey = '';\n  let perfLevel = 'high';\n  const MAX = 8;\n\n  const waterQ = new Uint32Array(65536);\n  let waterTail = 0;\n  let waterMark = null;\n  const logicQ = new Uint32Array(65536);\n  let logicTail = 0;\n  let logicMark = null;\n  const logicNetState = { version: 1, byConductor: new Map() };\n  let machineVersion = 1;\n  function scheduleLogic(i) {\n    if (!logicMark) return;\n    if (!inRegionIndex(i)) return;\n    if (logicMark[i]) return;\n    logicMark[i] = 1;\n    if (logicTail < 65536) logicQ[logicTail++] = i;\n  }\n\n  function scheduleLogicAround(x, y) {\n    if (x < 0 || y < 0 || x >= W || y >= H) return;\n    scheduleLogic(idx(x, y));\n    if (x > 0) scheduleLogic(idx(x - 1, y));\n    if (x + 1 < W) scheduleLogic(idx(x + 1, y));\n    if (y > 0) scheduleLogic(idx(x, y - 1));\n    if (y + 1 < H) scheduleLogic(idx(x, y + 1));\n  }\n\n  function setTile(i, newId, changes) {\n    const old = tiles[i];\n    if (old === newId) return false;\n    tiles[i] = newId;\n    changes.push(i, old, newId);\n    const x = (i / H) | 0;\n    const y = i - x * H;\n    scheduleWaterAround(x, y);\n    scheduleLogicAround(x, y);\n    return true;\n  }\n\n  function ensureWaterTile(i, changes) {\n    if (water[i] > 0) {\n      if (tiles[i] !== WATER) setTile(i, WATER, changes);\n    } else {\n      if (tiles[i] === WATER) setTile(i, AIR, changes);\n    }\n  }\n\n  function isWire(id) { return IDS && (id === IDS.WIRE_OFF || id === IDS.WIRE_ON); }\n  function isSwitch(id) { return IDS && (id === IDS.SWITCH_OFF || id === IDS.SWITCH_ON || id === IDS.PLATE_OFF || id === IDS.PLATE_ON); }\n  function isSource(id) { return IDS && (id === IDS.SWITCH_ON || id === IDS.PLATE_ON); }\n  function isLamp(id) { return IDS && (id === IDS.LAMP_OFF || id === IDS.LAMP_ON); }\n  function isPump(id) { return IDS && (id === IDS.PUMP_IN || id === IDS.PUMP_OUT); }\n  function isPumpTopologyTile(id) { return isPump(id); } // Unified naming\n  function isConductor(id) { return isWire(id) || isSwitch(id) || isPump(id); }\n  function canWaterEnterTile(id) { return id === AIR || id === WATER; }\n\n  function idx(x, y) { return x * H + y; }\n\n  function inRegionIndex(i) {\n    if (!region.set) return false;\n    const x = (i / H) | 0;\n    const y = i - x * H;\n    return (x >= region.x0 && x <= region.x1 && y >= region.y0 && y <= region.y1);\n  }\n\n  function scheduleWater(i) {\n      if (!inRegionIndex(i)) return;\n      if (waterMark[i]) return;\n      waterMark[i] = 1;\n      if (waterTail < 65536) waterQ[waterTail++] = i;\n  }\n\n  function scheduleWaterAround(x, y) {\n    if (x < 0 || y < 0 || x >= W || y >= H) return;\n    scheduleWater(idx(x, y));\n    if (x > 0) scheduleWater(idx(x - 1, y));\n    if (x + 1 < W) scheduleWater(idx(x + 1, y));\n    if (y > 0) scheduleWater(idx(x, y - 1));\n    if (y + 1 < H) scheduleWater(idx(x, y + 1));\n  }\n\n  function tryFlow(i, n, a, changes) {\n      const nt = tiles[n];\n      if (!canWaterEnterTile(nt)) return a;\n\n      const nb = water[n] | 0;\n      const diff = a - nb;\n      if (diff <= 1) return a;\n\n      let mv = diff >> 1;\n      if (mv < 1) mv = 1;\n\n      const space = MAX - nb;\n      if (mv > space) mv = space;\n      if (mv <= 0) return a;\n\n      water[i] = a - mv;\n      water[n] = nb + mv;\n      a = a - mv;\n\n      ensureWaterTile(i, changes);\n      ensureWaterTile(n, changes);\n\n      scheduleWater(n);\n      scheduleWater(i);\n      return a;\n  }\n\n  function waterTick(i, changes) {\n    waterMark[i] = 0;\n\n    // Fast region check\n    if (!region.set) return;\n    const x = (i / H) | 0;\n    const y = i - x * H;\n    if (x < region.x0 || x > region.x1 || y < region.y0 || y > region.y1) return;\n\n    let a = water[i] | 0;\n    if (a <= 0) return;\n\n    const tid = tiles[i];\n    if (tid !== WATER && tid !== AIR) { water[i] = 0; return; }\n\n    if (y + 1 < H) {\n      const d = i + 1;\n      const dt = tiles[d];\n      if (canWaterEnterTile(dt)) {\n        const b = water[d] | 0;\n        const space = MAX - b;\n        if (space > 0) {\n          const mv = a < space ? a : space;\n          water[i] = a - mv;\n          water[d] = b + mv;\n          a = water[i] | 0;\n\n          ensureWaterTile(i, changes);\n          ensureWaterTile(d, changes);\n\n          scheduleWater(d);\n          scheduleWater(i);\n          scheduleWaterAround(x, y);\n          scheduleWaterAround(x, y + 1);\n        }\n      }\n    }\n\n    if (a <= 0) return;\n\n    // Sides\n    if (x > 0) a = tryFlow(i, i - H, a, changes);\n    if (a > 0 && x + 1 < W) a = tryFlow(i, i + H, a, changes);\n  }\n\n  let vis = null;\n  let stamp = 1;\n  let lampSeen = null;\n  let lampStamp = 1;\n  const bfsQ = [];\n  const compTmp = [];\n  const lampsTmp = [];\n  const startsTmp = [];\n  let startSeen = null;\n  let startStamp = 1;\n  const touchedCompSet = new Set();\n\n  function invalidateLogicCache(versionHint) {\n    const hint = versionHint | 0;\n    if (hint > 0) logicNetState.version = hint;\n    else logicNetState.version = ((logicNetState.version | 0) + 1) | 0;\n    logicNetState.byConductor.clear();\n  }\n\n  function nextVisStamp() {\n    stamp = (stamp + 1) >>> 0;\n    if (stamp === 0) { stamp = 1; if (vis) vis.fill(0); }\n    return stamp;\n  }\n\n  function nextLampStamp() {\n    lampStamp = (lampStamp + 1) >>> 0;\n    if (lampStamp === 0) { lampStamp = 1; if (lampSeen) lampSeen.fill(0); }\n    return lampStamp;\n  }\n\n  function nextStartStamp() {\n    startStamp = (startStamp + 1) >>> 0;\n    if (startStamp === 0) { startStamp = 1; if (startSeen) startSeen.fill(0); }\n    return startStamp;\n  }\n\n  function ensureVis() {\n    const N = W * H;\n    if (!vis || vis.length !== N) vis = new Uint32Array(N);\n    if (!lampSeen || lampSeen.length !== N) lampSeen = new Uint32Array(N);\n    if (!startSeen || startSeen.length !== N) startSeen = new Uint32Array(N);\n  }\n\n  function isLogicTopologyTile(id) {\n    return isConductor(id) || isLamp(id);\n  }\n\n  function lampShouldOn(iLamp) {\n    const x = (iLamp / H) | 0;\n    const y = iLamp - x * H;\n    if (x > 0) { const t = tiles[iLamp - H]; if (t === IDS.WIRE_ON || t === IDS.SWITCH_ON || t === IDS.PLATE_ON) return true; }\n    if (x + 1 < W) { const t = tiles[iLamp + H]; if (t === IDS.WIRE_ON || t === IDS.SWITCH_ON || t === IDS.PLATE_ON) return true; }\n    if (y > 0) { const t = tiles[iLamp - 1]; if (t === IDS.WIRE_ON || t === IDS.SWITCH_ON || t === IDS.PLATE_ON) return true; }\n    if (y + 1 < H) { const t = tiles[iLamp + 1]; if (t === IDS.WIRE_ON || t === IDS.SWITCH_ON || t === IDS.PLATE_ON) return true; }\n    return false;\n  }\n\n  function updateLampAt(iLamp, changes) {\n    const t = tiles[iLamp];\n    if (!(t === IDS.LAMP_OFF || t === IDS.LAMP_ON)) return;\n    const want = lampShouldOn(iLamp) ? IDS.LAMP_ON : IDS.LAMP_OFF;\n    if (t !== want) setTile(iLamp, want, changes);\n  }\n\n  function collectLogicStarts(seed, changes) {\n    startsTmp.length = 0;\n    ensureVis();\n    const curStartStamp = nextStartStamp();\n    const sid = tiles[seed];\n    if (isConductor(sid)) {\n      startSeen[seed] = curStartStamp;\n      startsTmp.push(seed);\n      return startsTmp;\n    }\n\n    const x = (seed / H) | 0;\n    const y = seed - x * H;\n    const pushIfConductor = (n) => {\n      if (n < 0 || n >= W * H) return;\n      if (!isConductor(tiles[n])) return;\n      if (startSeen[n] === curStartStamp) return;\n      startSeen[n] = curStartStamp;\n      startsTmp.push(n);\n    };\n\n    if (x > 0) pushIfConductor(seed - H);\n    if (x + 1 < W) pushIfConductor(seed + H);\n    if (y > 0) pushIfConductor(seed - 1);\n    if (y + 1 < H) pushIfConductor(seed + 1);\n    if (isLamp(sid)) updateLampAt(seed, changes);\n    return startsTmp;\n  }\n\n  function buildCachedLogicComponent(start) {\n    ensureVis();\n    const curStamp = nextVisStamp();\n\n    bfsQ.length = 0;\n    compTmp.length = 0;\n    let powered = false;\n\n    vis[start] = curStamp;\n    bfsQ.push(start);\n\n    while (bfsQ.length) {\n      const i = bfsQ.pop();\n      const t = tiles[i];\n      if (!isConductor(t)) continue;\n\n      compTmp.push(i);\n      if (isSource(t)) powered = true;\n\n      const x = (i / H) | 0;\n      const y = i - x * H;\n      const push = (n) => {\n        if (n < 0 || n >= W * H) return;\n        if (vis[n] === curStamp) return;\n        if (!isConductor(tiles[n])) return;\n        vis[n] = curStamp;\n        bfsQ.push(n);\n      };\n\n      if (x > 0) push(i - H);\n      if (x + 1 < W) push(i + H);\n      if (y > 0) push(i - 1);\n      if (y + 1 < H) push(i + 1);\n\n      if (compTmp.length > 12000) break;\n    }\n\n    const curLampStamp = nextLampStamp();\n    lampsTmp.length = 0;\n    const markLamp = (n) => {\n      if (n < 0 || n >= W * H) return;\n      if (!isLamp(tiles[n])) return;\n      if (lampSeen[n] === curLampStamp) return;\n      lampSeen[n] = curLampStamp;\n      lampsTmp.push(n);\n    };\n\n    for (let i = 0, len = compTmp.length; i < len; i++) {\n      const p = compTmp[i];\n      const x = (p / H) | 0;\n      const y = p - x * H;\n      if (x > 0) markLamp(p - H);\n      if (x + 1 < W) markLamp(p + H);\n      if (y > 0) markLamp(p - 1);\n      if (y + 1 < H) markLamp(p + 1);\n    }\n\n    const nodes = compTmp.slice(0);\n    const lamps = lampsTmp.length ? lampsTmp.slice(0) : null;\n    const comp = { powered, nodes, lamps };\n    const cache = logicNetState.byConductor;\n    for (let i = 0, len = nodes.length; i < len; i++) cache.set(nodes[i], comp);\n    return comp;\n  }\n\n  function applyCachedLogicComponent(comp, changes) {\n    if (!comp || !comp.nodes || !comp.nodes.length) return 0;\n    const wantWire = comp.powered ? IDS.WIRE_ON : IDS.WIRE_OFF;\n\n    const nodes = comp.nodes;\n    for (let i = 0, len = nodes.length; i < len; i++) {\n      const p = nodes[i];\n      const t = tiles[p];\n      if (isWire(t) && t !== wantWire) setTile(p, wantWire, changes);\n    }\n\n    const lamps = comp.lamps;\n    if (lamps && lamps.length) {\n      for (let i = 0, len = lamps.length; i < len; i++) updateLampAt(lamps[i], changes);\n    }\n\n    return nodes.length;\n  }\n\n  function logicRecomputeFromSeed(seed, changes) {\n    logicMark[seed] = 0;\n    const starts = collectLogicStarts(seed, changes);\n    if (!starts.length) return 0;\n\n    touchedCompSet.clear();\n    let touchedNodes = 0;\n    const cache = logicNetState.byConductor;\n\n    for (let si = 0, slen = starts.length; si < slen; si++) {\n      const s = starts[si];\n      let comp = cache.get(s);\n      if (!comp) comp = buildCachedLogicComponent(s);\n      if (!comp) continue;\n      if (touchedCompSet.has(comp)) continue;\n      touchedCompSet.add(comp);\n      touchedNodes += applyCachedLogicComponent(comp, changes);\n    }\n\n    return touchedNodes;\n  }\n\n  function primeRegionWork() {\n    if (!region.set) return;\n    for (let x = region.x0; x <= region.x1; x++) {\n      const base = x * H;\n      for (let y = region.y0; y <= region.y1; y++) {\n        const i = base + y;\n        if (water[i] > 0) scheduleWater(i);\n        const t = tiles[i];\n        if (t === IDS.SWITCH_ON || t === IDS.PLATE_ON || isWire(t) || isLamp(t) || isPump(t)) scheduleLogic(i);\n      }\n    }\n  }\n\n  function step() {\n    const changes = [];\n\n    const waterBudget = (perfLevel === 'low') ? 350 : 1500;\n    for (let ops = 0; ops < waterBudget && waterTail > 0; ops++) {\n      waterTick(waterQ[--waterTail], changes);\n    }\n\n    const maxLogicTiles = (perfLevel === 'low') ? 2000 : 15000;\n    let logicTiles = 0;\n    while (logicTail > 0 && logicTiles < maxLogicTiles) {\n      logicTiles += logicRecomputeFromSeed(logicQ[--logicTail], changes);\n    }\n\n    if (changes.length) {\n      const buf = new Int32Array(changes);\n      postMessage({ type: 'changes', buf: buf.buffer }, [buf.buffer]);\n    }\n\n    const tickMs = (perfLevel === 'low') ? 55 : 30;\n    setTimeout(step, tickMs);\n  }\n\n  onmessage = (e) => {\n    const m = e.data;\n    if (!m || !m.type) return;\n\n    switch (m.type) {\n      case 'init': {\n        W = m.w | 0;\n        H = m.h | 0;\n        IDS = m.ids;\n        AIR = (m.blocks && (m.blocks.AIR | 0) >= 0) ? (m.blocks.AIR | 0) : 0;\n        WATER = (m.blocks && (m.blocks.WATER | 0) >= 0) ? (m.blocks.WATER | 0) : 27;\n\n        tiles = new Uint8Array(m.tiles);\n\n        const N = W * H;\n        water = new Uint8Array(N);\n        waterMark = new Uint8Array(N);\n        logicMark = new Uint8Array(N);\n        ensureVis();\n        invalidateLogicCache(1);\n        machineVersion = 1;\n\n        for (let i = 0; i < N; i++) if (tiles[i] === WATER) water[i] = MAX;\n\n        step();\n        break;\n      }\n\n      case 'tileWrite': {\n        if (!tiles) return;\n        const x = m.x | 0;\n        const y = m.y | 0;\n        if (x < 0 || y < 0 || x >= W || y >= H) return;\n\n        const i = idx(x, y);\n        const newId = m.id | 0;\n        const oldId = tiles[i];\n        tiles[i] = newId;\n\n        const mv = m.mv | 0;\n        if (mv > 0 && mv !== (machineVersion | 0)) {\n          machineVersion = mv;\n          invalidateLogicCache(machineVersion);\n        } else if (isLogicTopologyTile(oldId) || isLogicTopologyTile(newId)) {\n          invalidateLogicCache(0);\n        }\n\n        if (newId === WATER) {\n          water[i] = MAX;\n          scheduleWaterAround(x, y);\n        } else if (oldId === WATER && newId !== WATER) {\n          water[i] = 0;\n          scheduleWaterAround(x, y);\n        }\n\n        scheduleLogicAround(x, y);\n        break;\n      }\n\ncase 'tileWriteBatch': {\n        if (!tiles) return;\n        if (!m.buf) return;\n        const arr = new Int32Array(m.buf);\n        for (let j = 0; j < arr.length; j += 4) {\n          const x = arr[j] | 0;\n        const y = arr[j+1] | 0;\n        if (x < 0 || y < 0 || x >= W || y >= H) continue;\n\n        const i = idx(x, y);\n        const newId = arr[j+2] | 0;\n        const oldId = tiles[i];\n        tiles[i] = newId;\n\n        const mv = arr[j+3] | 0;\n        if (mv > 0 && mv !== (machineVersion | 0)) {\n          machineVersion = mv;\n          invalidateLogicCache(machineVersion);\n        } else if (isLogicTopologyTile(oldId) || isLogicTopologyTile(newId)) {\n          invalidateLogicCache(0);\n        }\n\n        if (newId === WATER) {\n          water[i] = MAX;\n          scheduleWaterAround(x, y);\n        } else if (oldId === WATER && newId !== WATER) {\n          water[i] = 0;\n          scheduleWaterAround(x, y);\n        }\n\n        scheduleLogicAround(x, y);\n        }\n        break;\n      }\n\n      case 'region': {\n        const cx = m.cx | 0, cy = m.cy | 0;\n        const rx = m.rx | 0, ry = m.ry | 0;\n\n        const x0 = Math.max(0, cx - rx);\n        const x1 = Math.min(W - 1, cx + rx);\n        const y0 = Math.max(0, cy - ry);\n        const y1 = Math.min(H - 1, cy + ry);\n\n        const key = (((x0) << 16) | ((y0) & 0xFFFF)) + ',' + (((x1) << 16) | ((y1) & 0xFFFF));\n        if (key !== lastRegionKey) {\n          lastRegionKey = key;\n          region.x0 = x0; region.x1 = x1; region.y0 = y0; region.y1 = y1; region.set = true;\n          primeRegionWork();\n        } else {\n          region.set = true;\n        }\n        break;\n      }\n\n      case 'perf': {\n        perfLevel = m.level || 'high';\n        break;\n      }\n      default: {\n        console.warn('[Worker] Unknown message type: ' + m.type);\n        break;\n      }\n    }\n  };\n})();";
     }
   }
   TU.TileLogicEngine = TileLogicEngine;
