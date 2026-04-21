@@ -3824,18 +3824,37 @@ body {
       return id;
     },
     remove(id) {
-      this._queue = this._queue.filter(item => item.id !== id);
+      const q = this._queue;
+      for (let i = 0; i < q.length; i++) {
+        if (q[i] && q[i].id === id) {
+          q[i] = null;
+          this._dirty = true;
+          break;
+        }
+      }
     },
     _start() {
       if (this._running) return;
       this._running = true;
       const tick = (ts) => {
+        if (this._dirty) {
+          let head = 0;
+          const q = this._queue;
+          for (let i = 0; i < q.length; i++) {
+            if (q[i]) q[head++] = q[i];
+          }
+          q.length = head;
+          this._dirty = false;
+        }
         if (this._queue.length === 0) {
           this._running = false;
           return;
         }
         for (let i = 0; i < this._queue.length; i++) {
-          try { this._queue[i].fn(ts); } catch (e) { console.warn('[AnimFrame]', e); }
+          try {
+            const item = this._queue[i];
+            if (item) item.fn(ts);
+          } catch (e) { console.warn('[AnimFrame]', e); }
         }
         requestAnimationFrame(tick);
       };
@@ -16425,8 +16444,8 @@ class Player {
   render(ctx, cam) {
     // OPTIMIZED: Null check for camera in hot path
     if (!cam || "number" != typeof cam.x || "number" != typeof cam.y) return;
-    const camPxX = Math.floor(cam.x),
-      camPxY = Math.floor(cam.y),
+    const camPxX = 0 | cam.x,
+      camPxY = 0 | cam.y,
       vYOffset = this._visualYOffset || 0,
       sx = (0 | this.x) - camPxX,
       sy = (this.y + vYOffset | 0) - camPxY;
@@ -19364,52 +19383,9 @@ class Renderer {
      */), result;
   }
   checkFlicker(timestamp) {
-    if (!this._desyncMode.enabled || this._flickerCheckFrames >= this._flickerCheckMax) return !1;
-    // Pixel-based flicker detection (more reliable than frame time)
-    // Sample specific pixels that should have consistent colors across frames
-    // Flicker causes these pixels to vary unexpectedly
-    // OPTIMIZED: Sample every 60 frames instead of 6 to reduce GPU-CPU sync overhead
-    if (this._flickerCheckFrames++, this._flickerCheckFrames % 60 == 0 && this.ctx) try {
-      // Sample a single sky pixel (minimize expensive readbacks)
-      const sx = .5 * this.w | 0,
-        sy = .3 * this.h | 0;
-      if (sx >= 0 && sy >= 0 && sx < this.w && sy < this.h) {
-        const pixel = this.ctx.getImageData(sx, sy, 1, 1).data,
-          c = pixel[0] << 16 | pixel[1] << 8 | pixel[2];
-        this._pixelSampleBuf || (this._pixelSampleBuf = new Int32Array(5), this._pixelSamplePos = 0, this._pixelSampleLen = 0);
-        const cap = 5,
-          p = 0 | this._pixelSamplePos;
-        this._pixelSampleBuf[p] = c;
-        this._pixelSamplePos = (p + 1) % cap;
-        (0 | this._pixelSampleLen) < cap && (this._pixelSampleLen = 1 + (0 | this._pixelSampleLen));
-      }
-      // Store samples for comparison
-      // Check for inconsistent sky colors across frames
-      // In desync mode, sky gradient can flicker between frames
-      const slen = 0 | this._pixelSampleLen;
-      if (slen >= 4) {
-        let inconsistentCount = 0;
-        const cap = 5,
-          baseIdx = ((0 | this._pixelSamplePos) - slen + cap) % cap,
-          base = 0 | this._pixelSampleBuf[baseIdx];
-        for (let i = 1; slen > i; i++) {
-          const a = 0 | this._pixelSampleBuf[(baseIdx + i) % cap],
-            dr = (a >> 16 & 255) - (base >> 16 & 255),
-            dg = (a >> 8 & 255) - (base >> 8 & 255),
-            db = (255 & a) - (255 & base);
-          dr * dr + dg * dg + db * db > 675 && inconsistentCount++;
-        }
-        // If more than 50% of samples are inconsistent, trigger fallback
-        if (inconsistentCount > .5 * slen) return this._handleDesyncFallback("pixel-inconsistency-detected"), !0;
-      }
-    } catch(e){console.warn('[Catch]',e);}
-    return this._lastFrameTime = timestamp, !1
-    /**
-     * @method _handleDesyncFallback
-     * @description Falls back from desynchronized to standard canvas mode.
-     * Recreates context and clears all caches to prevent visual artifacts.
-     * @param {string} reason - Fallback trigger reason
-     */;
+    // DISABLED: getImageData causes severe GPU-CPU readback pipeline stalls.
+    // Flicker detection should not sacrifice frame consistency.
+    return !1;
   }
   _handleDesyncFallback(reason) {
     if (this._desyncMode.enabled) {
@@ -20112,8 +20088,8 @@ class Renderer {
       bufferPx = this._worldCacheBuffer || 96,
       extendedShiftMax = this._worldShiftMax + bufferPx;
     if (skipMask && 0 !== (this._frameId & skipMask) && this._worldCache && !this._worldDirty && this._worldCacheKey === wKey2) {
-      const dx = Math.floor(camX) - this._worldCacheCamX,
-        dy = Math.floor(camY) - this._worldCacheCamY;
+      const dx = (0 | camX) - this._worldCacheCamX,
+        dy = (0 | camY) - this._worldCacheCamY;
       if (extendedShiftMax >= (0 > dx ? -dx : dx) && extendedShiftMax >= (0 > dy ? -dy : dy)) {
         if (1 === renderScale) {
           const drawX = bufferPx - dx,
@@ -20129,8 +20105,8 @@ class Renderer {
     }
     const lowResMode = this.lowPower || .8 > renderScale;
     if (this._worldCache && this._worldCacheKey === wKey2 && !this._worldDirty) {
-      const dx = Math.floor(camX) - this._worldCacheCamX,
-        dy = Math.floor(camY) - this._worldCacheCamY,
+      const dx = (0 | camX) - this._worldCacheCamX,
+        dy = (0 | camY) - this._worldCacheCamY,
         absDx = 0 > dx ? -dx : dx,
         absDy = 0 > dy ? -dy : dy,
         totalMove = absDx + absDy;
@@ -20158,11 +20134,11 @@ class Renderer {
         }
         return;
       }
-      if (48 >= totalMove && this._chunkCache.size > 0 && this._tryPartialCacheReuse(ctx, dx, dy, bufferPx, renderScale)) return this._worldCacheCamX = Math.floor(camX), void (this._worldCacheCamY = Math.floor(camY));
+      if (48 >= totalMove && this._chunkCache.size > 0 && this._tryPartialCacheReuse(ctx, dx, dy, bufferPx, renderScale)) return this._worldCacheCamX = 0 | camX, void (this._worldCacheCamY = 0 | camY);
     }
     if (skipMask && 0 !== (this._frameId & skipMask) && this._worldCache && !this._worldDirty && this._worldCacheKey === wKey2) {
-      const dx = Math.floor(camX) - this._worldCacheCamX,
-        dy = Math.floor(camY) - this._worldCacheCamY;
+      const dx = (0 | camX) - this._worldCacheCamX,
+        dy = (0 | camY) - this._worldCacheCamY;
       if (extendedShiftMax >= (0 > dx ? -dx : dx) && extendedShiftMax >= (0 > dy ? -dy : dy)) {
         if (1 === renderScale) {
           const drawX = bufferPx - dx,
@@ -24720,7 +24696,7 @@ class Game {
     // Inline Utils.clamp: avoid function call overhead in hot path
     0 > dtRaw ? dtRaw = 0 : dtRaw > 250 && (dtRaw = 250);
     this.lastTime = timestamp;
-    this._lastFrameTime = Date.now();
+    this._lastFrameTime = timestamp;
     this._monitorRuntimeHealth(dtRaw);
     this.frameCount++;
     const fpsSpan = timestamp - this.lastFpsUpdate;
