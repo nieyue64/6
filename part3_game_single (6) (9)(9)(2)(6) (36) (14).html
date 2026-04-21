@@ -22151,7 +22151,7 @@ class UIManager {
     this.miningNameEl = TU.DOMCache.get("mining-name");
     this.miningPercentEl = TU.DOMCache.get("mining-percent");
     this.miningIconEl = TU.DOMCache.get("mining-icon");
-    this.miningIconCtx = this.miningIconEl ? this.miningIconEl.getContext("2d", { willReadFrequently: !0 }) : null;
+    this.miningIconCtx = this.miningIconEl ? this.miningIconEl.getContext("2d") : null;
     this.miningIconCtx && (this.miningIconCtx.imageSmoothingEnabled = !1);
     // Mining HUD: dirty-check cache prevents DOM writes when id/pct unchanged
     this._miningVisible = !1;
@@ -22509,7 +22509,7 @@ class Minimap {
    */
   constructor(world) {
     this.canvas = TU.DOMCache.get("minimap-canvas");
-    this.ctx = this.canvas.getContext("2d", { willReadFrequently: !0 });
+    this.ctx = this.canvas.getContext("2d");
     this.ctx.imageSmoothingEnabled = !1;
     this._lastBuildAt = 0;
     this.buildIntervalMs = 120;
@@ -22523,7 +22523,7 @@ class Minimap {
     off.width = 160;
     off.height = 100;
     this._mapCanvas = off;
-    this._mapCtx = off.getContext("2d", { willReadFrequently: !0 });
+    this._mapCtx = off.getContext("2d");
     this._mapCtx.imageSmoothingEnabled = !1;
     this.imageData = this._mapCtx.createImageData(160, 100);
     this.dirty = !0;
@@ -30501,6 +30501,10 @@ window.TU;
             g.connect(out);
             o.start(now);
             o.stop(now + (dur || .06) + .02);
+            o.onended = () => {
+              o.disconnect();
+              g.disconnect();
+            };
           };
           AudioManager.prototype.noise = function (dur, vol, dest) {
             if (!this.ctx || !this._noiseBuf) return;
@@ -30518,6 +30522,10 @@ window.TU;
             g.connect(out);
             src.start(now);
             src.stop(now + (dur || .08) + .02);
+            src.onended = () => {
+              src.disconnect();
+              g.disconnect();
+            };
           };
           const _play = AudioManager.prototype.play;
           AudioManager.prototype.play = function (kind) {
@@ -30580,14 +30588,10 @@ window.TU;
           try {
             return canvas.getContext("2d", {
               alpha: !0
-            }) || canvas.getContext("2d", {
-              willReadFrequently: !0
-            });
+            }) || canvas.getContext("2d");
           } catch (e) {
             try {
-              return canvas.getContext("2d", {
-                willReadFrequently: !0
-              });
+              return canvas.getContext("2d");
             } catch {
               return null;
             }
@@ -30927,14 +30931,10 @@ window.TU;
             try {
               return canvas.getContext("2d", {
                 alpha: !0
-              }) || canvas.getContext("2d", {
-                willReadFrequently: !0
-              });
+              }) || canvas.getContext("2d");
             } catch (e) {
               try {
-                return canvas.getContext("2d", {
-                  willReadFrequently: !0
-                });
+                return canvas.getContext("2d");
               } catch {
                 return null;
               }
@@ -34524,16 +34524,16 @@ window.addEventListener("load", () => {
       _rleEncodeU8(buf) {
         if (!buf || !buf.length) return "";
         const len = 0 | buf.length;
-        let out = "",
+        let out = [],
           i = 0;
         for (; len > i;) {
           const v = 0 | buf[i];
           let c = 1;
           for (; len > i + c && 65535 > c && (0 | buf[i + c]) === v;) c++;
-          out += v.toString(36) + ":" + c.toString(36) + ";";
+          out.push(v.toString(36) + ":" + c.toString(36) + ";");
           i += c;
         }
-        return out;
+        return out.join("");
       }
       /**
        * @method _rleDecodeU8
