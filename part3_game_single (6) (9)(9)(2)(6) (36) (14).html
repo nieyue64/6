@@ -6577,8 +6577,8 @@ const TU_PERF = "undefined" != typeof performance && performance && "function" =
        */
       constructor(cellSize = 32) {
         this.cellSize = cellSize;
-        this.cells = Object.create(null);
-        // Object.create(null) for pure dict, no prototype chain
+        this.cells = new Map();
+        // Map for pure dict, avoiding dictionary mode degradation
         this._tempCoord = {
           cx: 0,
           cy: 0
@@ -6591,9 +6591,8 @@ const TU_PERF = "undefined" != typeof performance && performance && "function" =
         };
       }
       clear() {
-        // Reassign new object instead of clearing properties (avoids hidden class issues)
-        // Reassign new object instead of clearing properties (avoids hidden class issues)
-        this.cells = Object.create(null);
+        // Reassign new map instead of clearing properties (avoids hidden class issues)
+        this.cells = new Map();
         this._stats = {
           inserts: 0,
           queries: 0,
@@ -6624,8 +6623,8 @@ const TU_PERF = "undefined" != typeof performance && performance && "function" =
             cy: cy
           } = this._getCellCoord(x, y),
           key = this._getCellKey(cx, cy);
-        this.cells[key] || (this.cells[key] = []);
-        this.cells[key].push(obj);
+        this.cells.has(key) || this.cells.set(key, []);
+        this.cells.get(key).push(obj);
         this._stats.inserts++;
       }
       insertAABB(entity, aabb) {
@@ -6635,8 +6634,8 @@ const TU_PERF = "undefined" != typeof performance && performance && "function" =
           endY = (aabb.y + aabb.h) / this.cellSize | 0;
         for (let cx = startX; endX >= cx; cx++) for (let cy = startY; endY >= cy; cy++) {
           const key = this._getCellKey(cx, cy);
-          this.cells[key] || (this.cells[key] = []);
-          this.cells[key].push(entity);
+          this.cells.has(key) || this.cells.set(key, []);
+          this.cells.get(key).push(entity);
         }
         this._stats.inserts++;
       }
@@ -6659,7 +6658,7 @@ const TU_PERF = "undefined" != typeof performance && performance && "function" =
           } = this._getCellCoord(x, y),
           radiusSq = radius * radius;
         for (let dx = -cellRadius; cellRadius >= dx; dx++) for (let dy = -cellRadius; cellRadius >= dy; dy++) {
-          const cell = this.cells[this._getCellKey(cx + dx, cy + dy)];
+          const cell = this.cells.get(this._getCellKey(cx + dx, cy + dy));
           if (cell) for (let i = 0, _len5 = cell.length; _len5 > i; i++) {
             const entity = cell[i],
               dxEntity = entity.x - x,
@@ -6688,7 +6687,7 @@ const TU_PERF = "undefined" != typeof performance && performance && "function" =
           startCY = y / this.cellSize | 0,
           endCY = (y + h) / this.cellSize | 0;
         for (let cx = startCX; endCX >= cx; cx++) for (let cy = startCY; endCY >= cy; cy++) {
-          const cell = this.cells[this._getCellKey(cx, cy)];
+          const cell = this.cells.get(this._getCellKey(cx, cy));
           if (cell) for (let i = 0, _len6 = cell.length; _len6 > i; i++) out.push(cell[i]);
         }
         return this._stats.queries++, out
@@ -6707,7 +6706,7 @@ const TU_PERF = "undefined" != typeof performance && performance && "function" =
             cx: cx,
             cy: cy
           } = this._getCellCoord(x, y),
-          cell = this.cells[this._getCellKey(cx, cy)];
+          cell = this.cells.get(this._getCellKey(cx, cy));
         if (cell) {
           const idx = cell.indexOf(obj);
           if (idx > -1) {
@@ -6724,7 +6723,7 @@ const TU_PERF = "undefined" != typeof performance && performance && "function" =
         const oldKey = this._getCellKey(oldX / this.cellSize | 0, oldY / this.cellSize | 0),
           newKey = this._getCellKey(newX / this.cellSize | 0, newY / this.cellSize | 0);
         if (oldKey !== newKey) {
-          const oldCell = this.cells[oldKey];
+          const oldCell = this.cells.get(oldKey);
           if (oldCell) {
             const idx = oldCell.indexOf(obj);
             if (idx > -1) {
@@ -6733,8 +6732,8 @@ const TU_PERF = "undefined" != typeof performance && performance && "function" =
               oldCell.pop();
             }
           }
-          let newCell = this.cells[newKey];
-          newCell || (newCell = window.TU && window.TU.Pool && window.TU.Pool.ArrayPool ? window.TU.Pool.ArrayPool.get() : [], this.cells[newKey] = newCell);
+          let newCell = this.cells.get(newKey);
+          newCell || (newCell = window.TU && window.TU.Pool && window.TU.Pool.ArrayPool ? window.TU.Pool.ArrayPool.get() : [], this.cells.set(newKey, newCell));
           newCell.push(obj);
           this._stats.updates++;
         }
@@ -6751,7 +6750,7 @@ const TU_PERF = "undefined" != typeof performance && performance && "function" =
           endY = (aabb.y + aabb.h) / this.cellSize | 0;
         for (let cx = startX; endX >= cx; cx++) for (let cy = startY; endY >= cy; cy++) {
           const key = (65535 & cx) << 16 | 65535 & cy,
-            cell = this.cells[key];
+            cell = this.cells.get(key);
           if (cell) {
             const idx = cell.indexOf(entity);
             if (idx > -1) {
@@ -6769,7 +6768,7 @@ const TU_PERF = "undefined" != typeof performance && performance && "function" =
        * @returns {Object} Grid statistics including operations count and cell count
        */
       getStats() {
-        const cellCount = Object.keys(this.cells).length;
+        const cellCount = this.cells.size;
         return {
           ...this._stats,
           cellCount: cellCount
