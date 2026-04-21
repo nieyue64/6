@@ -30325,7 +30325,7 @@ window.TU;
             const byPump = netCache.byPump || (netCache.byPump = new Map());
             let q = this._pumpQ,
               out = this._pumpOut;
-            (!q || 24e3 > q.length) && (q = this._pumpQ = []);
+            q || (q = this._pumpQ = []);
             (!out || 2048 > out.length) && (out = this._pumpOut = new Int32Array(2048));
             const compPumpIn = this._pumpCompIn || (this._pumpCompIn = []);
             
