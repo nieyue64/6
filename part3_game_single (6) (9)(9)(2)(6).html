@@ -23888,9 +23888,11 @@ class Game {
     this.fps = 60;
     this.lastFpsUpdate = 0;
     this._frameId = 0;
-    // Fixed timestep + interpolated rendering for stable, responsive physics
-    this._fixedStep = 1e3 / 60;
-    // 16.6667ms
+    
+    // Set target physics framerate (e.g. 144Hz for smooth movement on high refresh monitors)
+    const targetFps = this.settings && this.settings.targetFps ? this.settings.targetFps : 144;
+    this._fixedStep = 1e3 / targetFps;
+    
     this._accumulator = 0;
     this._maxSubSteps = 5;
     this._camPrevX = 0;
@@ -24758,6 +24760,10 @@ class Game {
         const older = (perf.fpsSamples[0] + perf.fpsSamples[1] + perf.fpsSamples[2]) / 3;
         perf.trend = recent > older + 5 ? "improving" : older - 5 > recent ? "declining" : "stable";
       }
+      
+      const targetFps = this.settings && this.settings.targetFps ? this.settings.targetFps : 144;
+      this._fixedStep = 1e3 / targetFps;
+      
       50 > fpsNow ? (perf.lowForMs = perf.lowForMs + span | 0, perf.highForMs = 0) : fpsNow > 75 ? (perf.highForMs = perf.highForMs + span | 0, perf.lowForMs = 0) : (perf.lowForMs = perf.lowForMs > 0 ? perf.lowForMs - span | 0 : 0, perf.highForMs = perf.highForMs > 0 ? perf.highForMs - span | 0 : 0);
       const now = timestamp;
       if (now - (this._autoResLastAdjustAt || 0) > 700) {
@@ -24806,6 +24812,7 @@ class Game {
         finalRs > 1 && (finalRs = 1);
         this.renderer.setResolutionScale && window.GameEvents.emit("renderer:setResolutionScale", finalRs);
       }
+      
       if (this.minimap && (window.GameEvents.emit('minimap:setBuildInterval', 2 > scale ? 1.6 > scale ? 140 : 240 : 420)), this.particles) {
         let emitScale = 1,
           emitCap = 0,
@@ -24820,10 +24827,13 @@ class Game {
     const step = this._fixedStep || 16.6667;
     this._accumulator = (this._accumulator || 0) + dtRaw;
     let subSteps = 0;
+    
+    // Scale max steps inversely with timestep to prevent slow-motion on low refresh rate monitors
+    const stepRatio = 16.6667 / step;
     const fps = this.fps,
-      maxSubStepsBase = 25 > fps ? 2 : 40 > fps ? 3 : 55 > fps ? 4 : this._maxSubSteps,
+      maxSubStepsBase = Math.ceil((25 > fps ? 2 : 40 > fps ? 3 : 55 > fps ? 4 : this._maxSubSteps) * stepRatio),
       sc = this._logicCadenceScale || 1,
-      maxSubSteps = 2 > sc ? sc >= 1.6 && maxSubStepsBase > 3 ? 3 : maxSubStepsBase : maxSubStepsBase > 2 ? 2 : maxSubStepsBase;
+      maxSubSteps = 2 > sc ? sc >= 1.6 && maxSubStepsBase > Math.ceil(3 * stepRatio) ? Math.ceil(3 * stepRatio) : maxSubStepsBase : maxSubStepsBase > Math.ceil(2 * stepRatio) ? Math.ceil(2 * stepRatio) : maxSubStepsBase;
     if (this.paused) {
       this._accumulator = 0;
       const um = this._uiSkipMask || 0;
