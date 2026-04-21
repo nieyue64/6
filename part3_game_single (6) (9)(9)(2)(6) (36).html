@@ -30330,8 +30330,8 @@ window.TU;
             const byPump = netCache.byPump || (netCache.byPump = new Map());
             let q = game._pumpQ,
               out = game._pumpOut;
-            (!q || 24e3 > q.length) && (q = game._pumpQ = new Int32Array(24e3));
-            (!out || 2048 > out.length) && (out = game._pumpOut = new Int32Array(2048));
+            q = game._pumpQ = game._pumpQ || [];
+            out = game._pumpOut = game._pumpOut || [];
             const compPumpIn = game._pumpCompIn || (game._pumpCompIn = []);
             
             let cursor = 0 | m.pumpCursor;
@@ -30354,35 +30354,33 @@ window.TU;
                   powered = !1,
                   nodes = 0;
                 const curStamp = nextStamp();
-                for (vis[sx + sy * w | 0] = curStamp, q[qLen++] = (65535 & sx) << 16 | 65535 & sy, compPumpIn.length = 0; qLen > qHead && 24e3 > nodes;) {
-                  const v = 0 | q[qHead++],
-                    cx = v >>> 16 & 65535,
-                    cy = 65535 & v;
+                for (vis[sx + sy * w | 0] = curStamp, q.length = 0, out.length = 0, q.push(sx, sy), qLen = 2, compPumpIn.length = 0; qLen > qHead && 24e3 > nodes;) {
+                  const cx = q[qHead++], cy = q[qHead++];
                   nodes++;
                   const id = tiles[cx][cy];
                   _pumpIsPoweredSource(id) && (powered = !0);
-                  id === IDS.PUMP_OUT ? outLen < out.length && (out[outLen++] = (65535 & cx) << 16 | 65535 & cy) : id === IDS.PUMP_IN && compPumpIn.push(v);
+                  id === IDS.PUMP_OUT ? (out.push(cx, cy), outLen += 2) : id === IDS.PUMP_IN && compPumpIn.push((cx << 16) | cy);
                   
                   if (cx - 1 >= 0) {
                     const k = (cx - 1) + cy * w;
-                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx - 1][cy])) { vis[k] = curStamp; qLen < q.length && (q[qLen++] = (65535 & (cx - 1)) << 16 | 65535 & cy); }
+                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx - 1][cy])) { vis[k] = curStamp; (q.push(cx - 1, cy), qLen += 2); }
                   }
                   if (cx + 1 < w) {
                     const k = (cx + 1) + cy * w;
-                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx + 1][cy])) { vis[k] = curStamp; qLen < q.length && (q[qLen++] = (65535 & (cx + 1)) << 16 | 65535 & cy); }
+                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx + 1][cy])) { vis[k] = curStamp; (q.push(cx + 1, cy), qLen += 2); }
                   }
                   if (cy - 1 >= 0) {
                     const k = cx + (cy - 1) * w;
-                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx][cy - 1])) { vis[k] = curStamp; qLen < q.length && (q[qLen++] = (65535 & cx) << 16 | 65535 & (cy - 1)); }
+                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx][cy - 1])) { vis[k] = curStamp; (q.push(cx, cy - 1), qLen += 2); }
                   }
                   if (cy + 1 < h) {
                     const k = cx + (cy + 1) * w;
-                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx][cy + 1])) { vis[k] = curStamp; qLen < q.length && (q[qLen++] = (65535 & cx) << 16 | 65535 & (cy + 1)); }
+                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx][cy + 1])) { vis[k] = curStamp; (q.push(cx, cy + 1), qLen += 2); }
                   }
                 }
                 comp = {
                   powered: powered,
-                  out: outLen ? out.slice(0, outLen) : null,
+                  out: outLen ? out.slice(0) : null,
                   rr: 0
                 };
                 for (let i = 0, len = compPumpIn.length; len > i; i++) byPump.set(compPumpIn[i], comp);
