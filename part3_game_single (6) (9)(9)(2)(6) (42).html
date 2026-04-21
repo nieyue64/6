@@ -26834,12 +26834,19 @@ window.TU;
             this._grainPattern = this.ctx.createPattern(this._grainCanvas, "repeat");
           }
         };
+        const _tuCacheIsMobile = () => {
+          const de = document && document.documentElement;
+          window.__TU_CACHED_IS_MOBILE__ = !!(de && de.classList && de.classList.contains("is-mobile"));
+        };
+        _tuCacheIsMobile();
+        window.addEventListener("resize", _tuCacheIsMobile);
+        
         Renderer.prototype.applyPostFX = function (time, depth01, reducedMotion) {
           const ctx = this.ctx;
           if (!ctx || reducedMotion) return;
           try {
-            const de = document && document.documentElement;
-            if (de && de.classList && de.classList.contains("is-mobile")) return;
+            const isMobile = window.TU && TU.isMobile || window.__TU_CACHED_IS_MOBILE__;
+            if (isMobile) return;
           } catch(e){console.warn('[Catch]',e);}
           const w = this.w,
             h = this.h,
@@ -30228,16 +30235,6 @@ window.TU;
             "function" == typeof game._indexMachines && game._indexMachines();
           });
           // Pressure plate collision
-          const _markPlateUnder = (ent, ts, w, h, platesSet, next) => {
-            if (!ent) return;
-            const cx = ent.x + .5 * ent.w,
-              fy = ent.y + ent.h + 1,
-              tx = cx / ts | 0,
-              ty = fy / ts | 0;
-            if (0 > tx || 0 > ty || tx >= w || ty >= h) return;
-            const key = (65535 & tx) << 16 | 65535 & ty;
-            platesSet && platesSet.has(key) && next.add(key);
-          };
           window.GameEvents.on("game:update", (dtMs, game) => {
             const world = window.AppServices.get("world"),
               m = game._machines;
@@ -30251,9 +30248,19 @@ window.TU;
             1 !== game._plateKeyMode && (pressed.clear(), next.clear(), game._plateKeyMode = 1);
             next.clear();
             const platesSet = m.plates;
-            _markPlateUnder(window.AppServices.get("player"), ts, w, h, platesSet, next);
+            const _markPlateUnder = ent => {
+              if (!ent) return;
+              const cx = ent.x + .5 * ent.w,
+                fy = ent.y + ent.h + 1,
+                tx = cx / ts | 0,
+                ty = fy / ts | 0;
+              if (0 > tx || 0 > ty || tx >= w || ty >= h) return;
+              const key = (65535 & tx) << 16 | 65535 & ty;
+              platesSet && platesSet.has(key) && next.add(key);
+            };
+            _markPlateUnder(window.AppServices.get("player"));
             const ents = game.entities || game.mobs || game.enemies;
-            if (Array.isArray(ents)) for (let i = 0, len = ents.length; len > i; i++) _markPlateUnder(ents[i], ts, w, h, platesSet, next);
+            if (Array.isArray(ents)) for (let i = 0, len = ents.length; len > i; i++) _markPlateUnder(ents[i]);
             for (const k of next) {
               if (pressed.has(k)) continue;
               pressed.add(k);
@@ -30276,16 +30283,6 @@ window.TU;
           });
           Game.prototype.__tuPlateGcOptInstalled = !0;
           // Pump simulation (cross-region): moves water between PUMP_IN and PUMP_OUT on same wire network
-          const _pumpPickNeighborWater = (x, y, h, w, tiles, outXY) => {
-            let nx = x,
-              ny = y + 1;
-            return ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.WATER ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x - 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.WATER ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x + 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.WATER ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x, ny = y - 1, ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.WATER && (outXY[0] = nx, outXY[1] = ny, !0))));
-          };
-          const _pumpPickNeighborOutput = (x, y, h, w, tiles, outXY) => {
-            let nx = x,
-              ny = y - 1;
-            return ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x + 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x - 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x, ny = y + 1, ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.AIR && (outXY[0] = nx, outXY[1] = ny, !0))));
-          };
           const _pumpIsConductor = id => (id => id === IDS.WIRE_OFF || id === IDS.WIRE_ON)(id) || (id => id === IDS.SWITCH_OFF || id === IDS.SWITCH_ON || id === IDS.PLATE_OFF || id === IDS.PLATE_ON)(id) || (id => id === IDS.PUMP_IN || id === IDS.PUMP_OUT)(id);
           const _pumpIsPoweredSource = id => id === IDS.SWITCH_ON || id === IDS.PLATE_ON;
 
@@ -30302,6 +30299,15 @@ window.TU;
             const w = 0 | world.w,
               h = 0 | world.h,
               tiles = world.tiles;
+            
+            const _pumpPickNeighborWater = (x, y, outXY) => {
+              let nx = x, ny = y + 1;
+              return ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.WATER ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x - 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.WATER ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x + 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.WATER ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x, ny = y - 1, ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.WATER && (outXY[0] = nx, outXY[1] = ny, !0))));
+            };
+            const _pumpPickNeighborOutput = (x, y, outXY) => {
+              let nx = x, ny = y - 1;
+              return ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x + 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x - 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x, ny = y + 1, ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.AIR && (outXY[0] = nx, outXY[1] = ny, !0))));
+            };
             this._pumpVisited && this._pumpVisited.length === w * h || (this._pumpVisited = new Uint32Array(w * h), this._pumpStamp = 1);
             const vis = this._pumpVisited;
             let stamp = this._pumpStamp >>> 0 || 1;
@@ -30319,7 +30325,7 @@ window.TU;
             const byPump = netCache.byPump || (netCache.byPump = new Map());
             let q = this._pumpQ,
               out = this._pumpOut;
-            (!q || 24e3 > q.length) && (q = this._pumpQ = new Int32Array(24e3));
+            (!q || 24e3 > q.length) && (q = this._pumpQ = []);
             (!out || 2048 > out.length) && (out = this._pumpOut = new Int32Array(2048));
             const compPumpIn = this._pumpCompIn || (this._pumpCompIn = []);
             
@@ -30337,36 +30343,40 @@ window.TU;
               if (tiles[sx][sy] !== IDS.PUMP_IN) continue;
               let comp = byPump.get(pv);
               if (!comp) {
-                let qHead = 0,
-                  qLen = 0,
-                  outLen = 0,
+                let outLen = 0,
                   powered = !1,
                   nodes = 0;
                 const curStamp = (stamp = stamp + 1 >>> 0, 0 === stamp && (vis.fill(0), stamp = 1), this._pumpStamp = stamp, stamp);
-                for (vis[sx + sy * w | 0] = curStamp, q[qLen++] = (65535 & sx) << 16 | 65535 & sy, compPumpIn.length = 0; qLen > qHead && 24e3 > nodes;) {
-                  const v = 0 | q[qHead++],
-                    cx = v >>> 16 & 65535,
-                    cy = 65535 & v;
+                
+                q.length = 0;
+                q.push(sx, sy);
+                vis[sx + sy * w | 0] = curStamp;
+                compPumpIn.length = 0;
+                
+                let qHead = 0;
+                for (; q.length > qHead && 24e3 > nodes;) {
+                  const cx = q[qHead++];
+                  const cy = q[qHead++];
                   nodes++;
                   const id = tiles[cx][cy];
                   _pumpIsPoweredSource(id) && (powered = !0);
-                  id === IDS.PUMP_OUT ? outLen < out.length && (out[outLen++] = (65535 & cx) << 16 | 65535 & cy) : id === IDS.PUMP_IN && compPumpIn.push(v);
+                  id === IDS.PUMP_OUT ? outLen < out.length && (out[outLen++] = (65535 & cx) << 16 | 65535 & cy) : id === IDS.PUMP_IN && compPumpIn.push((65535 & cx) << 16 | 65535 & cy);
                   
                   if (cx - 1 >= 0) {
                     const k = (cx - 1) + cy * w;
-                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx - 1][cy])) { vis[k] = curStamp; qLen < q.length && (q[qLen++] = (65535 & (cx - 1)) << 16 | 65535 & cy); }
+                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx - 1][cy])) { vis[k] = curStamp; q.push(cx - 1, cy); }
                   }
                   if (cx + 1 < w) {
                     const k = (cx + 1) + cy * w;
-                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx + 1][cy])) { vis[k] = curStamp; qLen < q.length && (q[qLen++] = (65535 & (cx + 1)) << 16 | 65535 & cy); }
+                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx + 1][cy])) { vis[k] = curStamp; q.push(cx + 1, cy); }
                   }
                   if (cy - 1 >= 0) {
                     const k = cx + (cy - 1) * w;
-                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx][cy - 1])) { vis[k] = curStamp; qLen < q.length && (q[qLen++] = (65535 & cx) << 16 | 65535 & (cy - 1)); }
+                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx][cy - 1])) { vis[k] = curStamp; q.push(cx, cy - 1); }
                   }
                   if (cy + 1 < h) {
                     const k = cx + (cy + 1) * w;
-                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx][cy + 1])) { vis[k] = curStamp; qLen < q.length && (q[qLen++] = (65535 & cx) << 16 | 65535 & (cy + 1)); }
+                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx][cy + 1])) { vis[k] = curStamp; q.push(cx, cy + 1); }
                   }
                 }
                 comp = {
