@@ -30276,6 +30276,19 @@ window.TU;
           });
           Game.prototype.__tuPlateGcOptInstalled = !0;
           // Pump simulation (cross-region): moves water between PUMP_IN and PUMP_OUT on same wire network
+          const _pumpPickNeighborWater = (x, y, h, w, tiles, outXY) => {
+            let nx = x,
+              ny = y + 1;
+            return ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.WATER ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x - 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.WATER ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x + 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.WATER ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x, ny = y - 1, ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.WATER && (outXY[0] = nx, outXY[1] = ny, !0))));
+          };
+          const _pumpPickNeighborOutput = (x, y, h, w, tiles, outXY) => {
+            let nx = x,
+              ny = y - 1;
+            return ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x + 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x - 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x, ny = y + 1, ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.AIR && (outXY[0] = nx, outXY[1] = ny, !0))));
+          };
+          const _pumpIsConductor = id => (id => id === IDS.WIRE_OFF || id === IDS.WIRE_ON)(id) || (id => id === IDS.SWITCH_OFF || id === IDS.SWITCH_ON || id === IDS.PLATE_OFF || id === IDS.PLATE_ON)(id) || (id => id === IDS.PUMP_IN || id === IDS.PUMP_OUT)(id);
+          const _pumpIsPoweredSource = id => id === IDS.SWITCH_ON || id === IDS.PLATE_ON;
+
           Game.prototype._pumpSim = function(dtMs) {
             const world = this.world;
             if (!world || !world.tiles) return;
@@ -30292,22 +30305,10 @@ window.TU;
             this._pumpVisited && this._pumpVisited.length === w * h || (this._pumpVisited = new Uint32Array(w * h), this._pumpStamp = 1);
             const vis = this._pumpVisited;
             let stamp = this._pumpStamp >>> 0 || 1;
-            const nextStamp = () => (stamp = stamp + 1 >>> 0, 0 === stamp && (vis.fill(0), stamp = 1), this._pumpStamp = stamp, stamp),
-              isConductor = id => (id => id === IDS.WIRE_OFF || id === IDS.WIRE_ON)(id) || (id => id === IDS.SWITCH_OFF || id === IDS.SWITCH_ON || id === IDS.PLATE_OFF || id === IDS.PLATE_ON)(id) || (id => id === IDS.PUMP_IN || id === IDS.PUMP_OUT)(id),
-              isPoweredSource = id => id === IDS.SWITCH_ON || id === IDS.PLATE_ON,
-              tmpIn = this._pumpTmpIn || (this._pumpTmpIn = new Int32Array(2)),
-              tmpOut = this._pumpTmpOut || (this._pumpTmpOut = new Int32Array(2)),
-              pickNeighborWater = (x, y, outXY) => {
-                let nx = x,
-                  ny = y + 1;
-                return ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.WATER ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x - 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.WATER ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x + 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.WATER ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x, ny = y - 1, ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.WATER && (outXY[0] = nx, outXY[1] = ny, !0))));
-              },
-              pickNeighborOutput = (x, y, outXY) => {
-                let nx = x,
-                  ny = y - 1;
-                return ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x + 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x - 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x, ny = y + 1, ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.AIR && (outXY[0] = nx, outXY[1] = ny, !0))));
-              },
-              budget = this._perf && "low" === this._perf.level ? 1 : 3,
+            const nextStamp = () => (stamp = stamp + 1 >>> 0, 0 === stamp && (vis.fill(0), stamp = 1), this._pumpStamp = stamp, stamp);
+            const tmpIn = this._pumpTmpIn || (this._pumpTmpIn = new Int32Array(2));
+            const tmpOut = this._pumpTmpOut || (this._pumpTmpOut = new Int32Array(2));
+            const budget = this._perf && "low" === this._perf.level ? 1 : 3,
               tileVersion = 0 | world._tileVersion,
               machineVersion = 0 | world._machineVersion;
             let netCache = this._pumpNetCache;
@@ -30321,42 +30322,8 @@ window.TU;
               out = this._pumpOut;
             (!q || 24e3 > q.length) && (q = this._pumpQ = new Int32Array(24e3));
             (!out || 2048 > out.length) && (out = this._pumpOut = new Int32Array(2048));
-            const compPumpIn = this._pumpCompIn || (this._pumpCompIn = []),
-              buildComponent = (seedPacked, sx, sy) => {
-                let qHead = 0,
-                  qLen = 0,
-                  outLen = 0,
-                  powered = !1,
-                  nodes = 0;
-                const curStamp = nextStamp();
-                for (vis[sx + sy * w | 0] = curStamp, q[qLen++] = (65535 & sx) << 16 | 65535 & sy, compPumpIn.length = 0; qLen > qHead && 24e3 > nodes;) {
-                  const v = 0 | q[qHead++],
-                    x = v >>> 16 & 65535,
-                    y = 65535 & v;
-                  nodes++;
-                  const id = tiles[x][y];
-                  isPoweredSource(id) && (powered = !0);
-                  id === IDS.PUMP_OUT ? outLen < out.length && (out[outLen++] = (65535 & x) << 16 | 65535 & y) : id === IDS.PUMP_IN && compPumpIn.push(v);
-                  const push = (nx, ny) => {
-                    if (0 > nx || 0 > ny || nx >= w || ny >= h) return;
-                    const k = nx + ny * w;
-                    if (vis[k] === curStamp) return;
-                    const tid = tiles[nx][ny];
-                    isConductor(tid) && (vis[k] = curStamp, qLen < q.length && (q[qLen++] = (65535 & nx) << 16 | 65535 & ny));
-                  };
-                  push(x - 1, y);
-                  push(x + 1, y);
-                  push(x, y - 1);
-                  push(x, y + 1);
-                }
-                const comp = {
-                  powered: powered,
-                  out: outLen ? out.slice(0, outLen) : null,
-                  rr: 0
-                };
-                for (let i = 0, len = compPumpIn.length; len > i; i++) byPump.set(compPumpIn[i], comp);
-                return byPump.set(seedPacked, comp), comp;
-              };
+            const compPumpIn = this._pumpCompIn || (this._pumpCompIn = []);
+            
             let cursor = 0 | m.pumpCursor;
             (0 > cursor || cursor >= totalIn) && (cursor = 0);
             let done = 0,
@@ -30370,13 +30337,55 @@ window.TU;
               if (0 > sx || 0 > sy || sx >= w || sy >= h) continue;
               if (tiles[sx][sy] !== IDS.PUMP_IN) continue;
               let comp = byPump.get(pv);
-              if (comp || (comp = buildComponent(pv, sx, sy)), !(comp && comp.powered && comp.out && comp.out.length)) continue;
-              if (!pickNeighborWater(sx, sy, tmpIn)) continue;
+              if (!comp) {
+                let qHead = 0,
+                  qLen = 0,
+                  outLen = 0,
+                  powered = !1,
+                  nodes = 0;
+                const curStamp = nextStamp();
+                for (vis[sx + sy * w | 0] = curStamp, q[qLen++] = (65535 & sx) << 16 | 65535 & sy, compPumpIn.length = 0; qLen > qHead && 24e3 > nodes;) {
+                  const v = 0 | q[qHead++],
+                    cx = v >>> 16 & 65535,
+                    cy = 65535 & v;
+                  nodes++;
+                  const id = tiles[cx][cy];
+                  _pumpIsPoweredSource(id) && (powered = !0);
+                  id === IDS.PUMP_OUT ? outLen < out.length && (out[outLen++] = (65535 & cx) << 16 | 65535 & cy) : id === IDS.PUMP_IN && compPumpIn.push(v);
+                  
+                  if (cx - 1 >= 0) {
+                    const k = (cx - 1) + cy * w;
+                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx - 1][cy])) { vis[k] = curStamp; qLen < q.length && (q[qLen++] = (65535 & (cx - 1)) << 16 | 65535 & cy); }
+                  }
+                  if (cx + 1 < w) {
+                    const k = (cx + 1) + cy * w;
+                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx + 1][cy])) { vis[k] = curStamp; qLen < q.length && (q[qLen++] = (65535 & (cx + 1)) << 16 | 65535 & cy); }
+                  }
+                  if (cy - 1 >= 0) {
+                    const k = cx + (cy - 1) * w;
+                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx][cy - 1])) { vis[k] = curStamp; qLen < q.length && (q[qLen++] = (65535 & cx) << 16 | 65535 & (cy - 1)); }
+                  }
+                  if (cy + 1 < h) {
+                    const k = cx + (cy + 1) * w;
+                    if (vis[k] !== curStamp && _pumpIsConductor(tiles[cx][cy + 1])) { vis[k] = curStamp; qLen < q.length && (q[qLen++] = (65535 & cx) << 16 | 65535 & (cy + 1)); }
+                  }
+                }
+                comp = {
+                  powered: powered,
+                  out: outLen ? out.slice(0, outLen) : null,
+                  rr: 0
+                };
+                for (let i = 0, len = compPumpIn.length; len > i; i++) byPump.set(compPumpIn[i], comp);
+                byPump.set(pv, comp);
+              }
+              
+              if (!(comp && comp.powered && comp.out && comp.out.length)) continue;
+              if (!_pumpPickNeighborWater(sx, sy, h, w, tiles, tmpIn)) continue;
               const outList = comp.out,
                 rr = (0 | comp.rr) % outList.length;
               comp.rr = rr + 1 | 0;
               const ov = 0 | outList[rr];
-              pickNeighborOutput(ov >>> 16 & 65535, 65535 & ov, tmpOut) && (this._writeTileFast(tmpIn[0], tmpIn[1], BLOCK.AIR, !1), this._writeTileFast(tmpOut[0], tmpOut[1], BLOCK.WATER, !1), done++);
+              _pumpPickNeighborOutput(ov >>> 16 & 65535, 65535 & ov, h, w, tiles, tmpOut) && (this._writeTileFast(tmpIn[0], tmpIn[1], BLOCK.AIR, !1), this._writeTileFast(tmpOut[0], tmpOut[1], BLOCK.WATER, !1), done++);
             }
             m.pumpCursor = totalIn ? (cursor + (scanned || budget)) % totalIn : 0;
           };
