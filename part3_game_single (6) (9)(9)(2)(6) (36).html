@@ -30286,22 +30286,25 @@ window.TU;
               game._machines || ("function" == typeof game._indexMachines && game._indexMachines());
               "function" == typeof game._updatePressurePlates && game._updatePressurePlates();
               
+            const world = game.world;
+            if (!world || !world.tiles) return;
+            const w = 0 | world.w,
+              h = 0 | world.h,
+              tiles = world.tiles;
+            
             // --- INLINED PUMP SIMULATION ---
-            const _pumpPickNeighborWater = (x, y, h, w, tiles, outXY) => {
+            const _pumpPickNeighborWater = (x, y, outXY) => {
             let nx = x,
               ny = y + 1;
             return ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.WATER ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x - 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.WATER ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x + 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.WATER ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x, ny = y - 1, ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.WATER && (outXY[0] = nx, outXY[1] = ny, !0))));
           };
-            const _pumpPickNeighborOutput = (x, y, h, w, tiles, outXY) => {
+            const _pumpPickNeighborOutput = (x, y, outXY) => {
             let nx = x,
               ny = y - 1;
             return ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x + 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x - 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x, ny = y + 1, ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.AIR && (outXY[0] = nx, outXY[1] = ny, !0))));
           };
             const _pumpIsConductor = id => id === IDS.WIRE_OFF || id === IDS.WIRE_ON || id === IDS.SWITCH_OFF || id === IDS.SWITCH_ON || id === IDS.PLATE_OFF || id === IDS.PLATE_ON || id === IDS.PUMP_IN || id === IDS.PUMP_OUT;
             const _pumpIsPoweredSource = id => id === IDS.SWITCH_ON || id === IDS.PLATE_ON;
-            
-            const world = game.world;
-            if (!world || !world.tiles) return;
             const m = game._machines;
             if (!m || !m.pumpsIn || !m.pumpsOut) return;
             const pumpsIn = m.pumpsIn,
@@ -30390,12 +30393,12 @@ window.TU;
               }
               
               if (!(comp && comp.powered && comp.out && comp.out.length)) continue;
-              if (!_pumpPickNeighborWater(sx, sy, h, w, tiles, tmpIn)) continue;
+              if (!_pumpPickNeighborWater(sx, sy, tmpIn)) continue;
               const outList = comp.out,
                 rr = (0 | comp.rr) % outList.length;
               comp.rr = rr + 1 | 0;
               const ov = 0 | outList[rr];
-              _pumpPickNeighborOutput(ov >>> 16 & 65535, 65535 & ov, h, w, tiles, tmpOut) && (game._writeTileFast(tmpIn[0], tmpIn[1], BLOCK.AIR, !1), game._writeTileFast(tmpOut[0], tmpOut[1], BLOCK.WATER, !1), done++);
+              _pumpPickNeighborOutput(ov >>> 16 & 65535, 65535 & ov, tmpOut) && (game._writeTileFast(tmpIn[0], tmpIn[1], BLOCK.AIR, !1), game._writeTileFast(tmpOut[0], tmpOut[1], BLOCK.WATER, !1), done++);
             }
             m.pumpCursor = totalIn ? (cursor + (scanned || budget)) % totalIn : 0;
             // --- END INLINED PUMP SIMULATION ---
