@@ -30297,7 +30297,7 @@ window.TU;
               ny = y - 1;
             return ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x + 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x - 1, ny = y, nx >= 0 && w > nx && tiles[nx][ny] === BLOCK.AIR ? (outXY[0] = nx, outXY[1] = ny, !0) : (nx = x, ny = y + 1, ny >= 0 && h > ny && tiles[nx][ny] === BLOCK.AIR && (outXY[0] = nx, outXY[1] = ny, !0))));
           };
-            const _pumpIsConductor = id => (id => id === IDS.WIRE_OFF || id === IDS.WIRE_ON)(id) || (id => id === IDS.SWITCH_OFF || id === IDS.SWITCH_ON || id === IDS.PLATE_OFF || id === IDS.PLATE_ON)(id) || (id => id === IDS.PUMP_IN || id === IDS.PUMP_OUT)(id);
+            const _pumpIsConductor = id => id === IDS.WIRE_OFF || id === IDS.WIRE_ON || id === IDS.SWITCH_OFF || id === IDS.SWITCH_ON || id === IDS.PLATE_OFF || id === IDS.PLATE_ON || id === IDS.PUMP_IN || id === IDS.PUMP_OUT;
             const _pumpIsPoweredSource = id => id === IDS.SWITCH_ON || id === IDS.PLATE_ON;
             
             const world = game.world;
