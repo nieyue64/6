@@ -7125,7 +7125,8 @@ const TU_PERF = "undefined" != typeof performance && performance && "function" =
           const stats = this.getStats();
           let memStr = "N/A";
           stats.memory && (memStr = `${stats.memory.usedMB}/${stats.memory.limitMB}MB`);
-          const fpsColor = 55 > stats.fps ? 30 > stats.fps ? "#f00" : "#ff0" : "#0f0";
+          const targetFps = window.AppServices.get("settings") && window.AppServices.get("settings").targetFps ? window.AppServices.get("settings").targetFps : 144;
+          const fpsColor = targetFps * 0.9 > stats.fps ? targetFps * 0.5 > stats.fps ? "#f00" : "#ff0" : "#0f0";
           // OPT: Cache DOM refs to avoid repeated querySelector calls
           let fpsEl = this._domFpsVal,
             frameEl = this._domFrameVal,
@@ -7880,19 +7881,19 @@ const PerfMonitor = window.AppServices.get("perfMonitor") || {
   },
   getAverageFPS() {
     const count = this._sampleCount < this._maxSamples ? this._sampleCount : this._maxSamples;
-    if (count === 0) return 60;
+    if (count === 0) return 144;
     try {
       const avg = this._frameTimeSum / count;
-      return avg <= 0 || avg > 1000 ? 60 : Math.max(1, Math.min(999, (1000 / avg + 0.5) | 0));
+      return avg <= 0 || avg > 1000 ? 144 : Math.max(1, Math.min(999, (1000 / avg + 0.5) | 0));
     } catch (e) {
-      return 60;
+      return 144;
     }
   },
   getMinFPS() {
-    return this._frameTimeMax <= 0 || this._frameTimeMax > 1000 ? 60 : Math.max(1, Math.min(999, (1000 / this._frameTimeMax + 0.5) | 0));
+    return this._frameTimeMax <= 0 || this._frameTimeMax > 1000 ? 144 : Math.max(1, Math.min(999, (1000 / this._frameTimeMax + 0.5) | 0));
   },
   getMaxFPS() {
-    return this._frameTimeMin <= 0 || this._frameTimeMin > 1000 || this._frameTimeMin === Infinity ? 60 : Math.max(1, Math.min(999, (1000 / this._frameTimeMin + 0.5) | 0));
+    return this._frameTimeMin <= 0 || this._frameTimeMin > 1000 || this._frameTimeMin === Infinity ? 144 : Math.max(1, Math.min(999, (1000 / this._frameTimeMin + 0.5) | 0));
   },
   getFrameTimeStats() {
     const count = this._sampleCount < this._maxSamples ? this._sampleCount : this._maxSamples;
@@ -18914,12 +18915,12 @@ class Renderer {
       minFrameTime: 1 / 0,
       maxFrameTime: 0,
       // FPS tracking
-      fps: 60,
+      fps: 144,
       fpsHistory: new Float32Array(30),
       fpsHistoryIdx: 0,
-      avgFps: 60,
-      minFps: 60,
-      maxFps: 60,
+      avgFps: 144,
+      minFps: 144,
+      maxFps: 144,
       // Chunk build performance
       chunkBuildTimes: new Float32Array(32),
       chunkBuildIdx: 0,
@@ -19070,7 +19071,8 @@ class Renderer {
     for (let i = 0; 60 > i; i++) sum += pm.frameTimes[i];
     pm.avgFrameTime = sum / 60;
     // Calculate FPS
-    pm.fps = frameTime > 0 ? Math.min(60, 1e3 / frameTime) : 60;
+    const targetFps = this.settings && this.settings.targetFps ? this.settings.targetFps : 144;
+    pm.fps = frameTime > 0 ? Math.min(targetFps, 1e3 / frameTime) : targetFps;
     pm.fpsHistory[pm.fpsHistoryIdx] = pm.fps;
     pm.fpsHistoryIdx = (pm.fpsHistoryIdx + 1) % 30; // Calculate average FPS
     let fpsSum = 0;
@@ -21088,9 +21090,11 @@ class Renderer {
       };
     }
     const pm = window.AppServices.get("perfMonitor"),
-      afps = pm && "function" == typeof pm.getAverageFPS ? pm.getAverageFPS() : 0;
+      afps = pm && "function" == typeof pm.getAverageFPS ? pm.getAverageFPS() : 0,
+      gs = window.AppServices.get("settings") || {},
+      targetFps = gs && gs.targetFps ? gs.targetFps : 144;
     let scale = .5;
-    scale = this.lowPower || afps && 70 > afps ? .5 : .66;
+    scale = this.lowPower || afps && targetFps * 0.48 > afps ? .5 : .66;
     const bw = Math.max(1, wPx * scale | 0),
       bh = Math.max(1, hPx * scale | 0);
     buf.c.width === bw && buf.c.height === bh && buf.scale === scale || (buf.c.width = bw, buf.c.height = bh, buf.scale = scale);
@@ -21126,7 +21130,7 @@ class Renderer {
     const pm = window.AppServices.get("perfMonitor");
     if (pm && "function" == typeof pm.getAverageFPS) {
       const afps = pm.getAverageFPS();
-      if (afps && 55 > afps ? mode = 0 : afps && 75 > afps && mode > 1 && (mode = 1), 0 >= mode) return;
+      if (afps && targetFps * 0.38 > afps ? mode = 0 : afps && targetFps * 0.52 > afps && mode > 1 && (mode = 1), 0 >= mode) return;
     }
     const ctx = this.ctx,
       canvas = this.canvas,
@@ -21135,7 +21139,7 @@ class Renderer {
       hPx = canvas.height,
       afps2 = pm && "function" == typeof pm.getAverageFPS ? pm.getAverageFPS() : 0;
     let ppScale = .75;
-    if ((this.lowPower || dpr >= 1.5 || afps2 && 85 > afps2) && (ppScale = .5), 1 === mode && !this.lowPower && (!afps2 || afps2 >= 100) && 1.5 > dpr && (ppScale = .75), ppScale !== this._ppScale) {
+    if ((this.lowPower || dpr >= 1.5 || afps2 && targetFps * 0.59 > afps2) && (ppScale = .5), 1 === mode && !this.lowPower && (!afps2 || afps2 >= targetFps * 0.69) && 1.5 > dpr && (ppScale = .75), ppScale !== this._ppScale) {
       this._ppScale = ppScale;
       const pp = this._pp;
       pp && pp.canvas && (pp.canvas.width = Math.max(1, wPx * ppScale + .5 | 0), pp.canvas.height = Math.max(1, hPx * ppScale + .5 | 0));
@@ -21161,7 +21165,7 @@ class Renderer {
     const pm2 = window.AppServices.get("perfMonitor");
     if (pm2 && "function" == typeof pm2.getAverageFPS) {
       const afps3 = pm2.getAverageFPS();
-      afps3 && 55 > afps3 ? stride = 6 > stride ? 6 : stride : afps3 && 80 > afps3 && (stride = 4 > stride ? 4 : stride);
+      afps3 && targetFps * 0.38 > afps3 ? stride = 6 > stride ? 6 : stride : afps3 && targetFps * 0.55 > afps3 && (stride = 4 > stride ? 4 : stride);
     }
     // Bloom pass: bright regions bleed into neighbors (mode>=2 only)
     if (mode >= 2) {
@@ -21994,7 +21998,10 @@ Object.assign(window.TU, {
         reason: "hidden-fps"
       });else {
         if (p) if (auto) {
-          45 > fps ? (p.lowForMs = (p.lowForMs || 0) + span, p.highForMs = 0) : fps > 56 ? (p.highForMs = (p.highForMs || 0) + span, p.lowForMs = 0) : (p.lowForMs = 0, p.highForMs = 0);
+          const targetFps = g && g.settings && g.settings.targetFps ? g.settings.targetFps : 144;
+          const lowThreshold = targetFps * 0.75;
+          const highThreshold = targetFps * 0.95;
+          lowThreshold > fps ? (p.lowForMs = (p.lowForMs || 0) + span, p.highForMs = 0) : fps > highThreshold ? (p.highForMs = (p.highForMs || 0) + span, p.lowForMs = 0) : (p.lowForMs = 0, p.highForMs = 0);
           // Low-end: 600ms threshold vs 1000ms normal; faster response to sustained low FPS
           const wantLow = p.lowForMs >= 1e3 || this.device.lowEnd && p.lowForMs >= 600,
             wantHigh = p.highForMs >= 1400;
@@ -22027,7 +22034,8 @@ Object.assign(window.TU, {
       let minScale = "low" === (g._perf && g._perf.level ? g._perf.level : this.state.level) ? .75 : .82;
       this.device.lowEnd && (minScale -= .04);
       minScale = clamp(minScale, .6, 1);
-      const target = minScale + (1 - minScale) * clamp((fps - 28) / 22, 0, 1),
+      const targetFps = g && g.settings && g.settings.targetFps ? g.settings.targetFps : 144;
+      const target = minScale + (1 - minScale) * clamp((fps - (targetFps*0.4)) / (targetFps*0.3), 0, 1),
         clamp01 = v => clamp(v, .5, 1),
         quant = v => clamp01(.125 * (v / .125 + .5 | 0)),
         curRaw = isNum((window.AppServices.get("renderer")).resolutionScale) ? (window.AppServices.get("renderer")).resolutionScale : 1,
@@ -24921,6 +24929,8 @@ class Game {
     const uiFlush = this.uiFlush;
     uiFlush && uiFlush.flush();
     frameHadError || (this._loopErrorCount = 0, this._loopErrorWindowStart = 0);
+    
+    // Always use requestAnimationFrame for the loop, don't fallback to setTimeout which locks at 60Hz
     this._rafRunning && requestAnimationFrame(this._rafCb);
   }
   _updateDynamicChunks(player, world) {
