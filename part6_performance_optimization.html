@@ -28939,17 +28939,17 @@ window.TU;
             const a = +fx.postA || 0,
               lightning = +fx.lightning || 0;
             if (.001 >= a && .001 >= lightning) return;
-            const ctx = this.ctx,
+            const myCtx = this.ctx,
               canvas = this.canvas;
-            if (!ctx || !canvas) return;
+            if (!myCtx || !canvas) return;
             const wPx = 0 | canvas.width,
               hPx = 0 | canvas.height;
-            if (ctx.save(), ctx.setTransform(1, 0, 0, 1, 0, 0), ctx.globalAlpha = 1, a > .001) {
+            if (myCtx.save(), myCtx.setTransform(1, 0, 0, 1, 0, 0), myCtx.globalAlpha = 1, a > .001) {
               const r = 255 & fx.postR,
                 g = 255 & fx.postG,
                 b = 255 & fx.postB,
                 mode2 = fx.postMode || "source-over";
-              ctx.globalCompositeOperation = mode2;
+              myCtx.globalCompositeOperation = mode2;
               const wc = this._weatherPostCache || (this._weatherPostCache = {
                 r: -1,
                 g: -1,
@@ -28965,14 +28965,14 @@ window.TU;
               wc.r === r && wc.g === g && wc.b === b || (wc.r = r, wc.g = g, wc.b = b, wc.rgb = "rgb(" + (r << 16 | g & 0xFFFF) + "," + b + ")");
               const aQ = 1e3 * a + .5 | 0;
               wc.aQ !== aQ && (wc.aQ = aQ);
-              ctx.fillStyle = wc.rgb;
-              ctx.globalAlpha = .001 * aQ;
-              ctx.fillRect(0, 0, 0 | wPx, 0 | hPx);
-              ctx.globalAlpha = 1;
+              myCtx.fillStyle = wc.rgb;
+              myCtx.globalAlpha = .001 * aQ;
+              myCtx.fillRect(0, 0, 0 | wPx, 0 | hPx);
+              myCtx.globalAlpha = 1;
             }
             if (lightning > .001) {
               const f = Utils.clamp(lightning, 0, 1);
-              ctx.globalCompositeOperation = "screen";
+              myCtx.globalCompositeOperation = "screen";
               const wc = this._weatherPostCache || (this._weatherPostCache = {
                   r: -1,
                   g: -1,
@@ -28987,10 +28987,10 @@ window.TU;
                 }),
                 lightningAQ = 1e3 * (.1 + .34 * f) + .5 | 0;
               wc.lightningAQ !== lightningAQ && (wc.lightningAQ = lightningAQ);
-              ctx.fillStyle = "rgb(210,230,255)";
-              ctx.globalAlpha = .001 * lightningAQ;
-              ctx.fillRect(0, 0, 0 | wPx, 0 | hPx);
-              ctx.globalAlpha = 1;
+              myCtx.fillStyle = "rgb(210,230,255)";
+              myCtx.globalAlpha = .001 * lightningAQ;
+              myCtx.fillRect(0, 0, 0 | wPx, 0 | hPx);
+              myCtx.globalAlpha = 1;
               const cx = .5 * wPx,
                 cy = .45 * hPx,
                 r0 = .06 * (hPx > wPx ? wPx : hPx),
@@ -29000,19 +29000,19 @@ window.TU;
                 wc.radAQ = radAQ;
                 wc.w = wPx;
                 wc.h = hPx;
-                const gg = ctx.createRadialGradient(cx, cy, r0, cx, cy, r1);
+                const gg = myCtx.createRadialGradient(cx, cy, r0, cx, cy, r1);
                 gg.addColorStop(0, "rgba(255,255,255," + .001 * radAQ + ")");
                 gg.addColorStop(1, "rgba(255,255,255,0)");
                 wc.rad = gg;
               }
-              ctx.fillStyle = wc.rad;
-              ctx.fillRect(0, 0, 0 | wPx, 0 | hPx);
+              myCtx.fillStyle = wc.rad;
+              myCtx.fillRect(0, 0, 0 | wPx, 0 | hPx);
             }
-            ctx.globalCompositeOperation = "source-over";
+            myCtx.globalCompositeOperation = "source-over";
             try {
-              ctx.imageSmoothingEnabled = !1;
+              myCtx.imageSmoothingEnabled = !1;
             } catch(e){console.warn('[Catch]',e);}
-            ctx.restore();
+            myCtx.restore();
           };
           // SUPERSEDED: This older weather tint is replaced by the optimized version
           // registered as pipeline stage 'weather:tintOptimized' at order 10.
