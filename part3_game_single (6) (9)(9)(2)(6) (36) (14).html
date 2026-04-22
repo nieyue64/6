@@ -9786,22 +9786,35 @@ class SaveSystem {
       h: world.h,
       diffs: SaveSystem._encodeDiff(this.diff, world.w)
     };
-    let serialized;
-    try {
-      serialized = JSON.stringify(payload);
-    } catch (e) {
-      return void window.GameEvents.emit('ui:toast', "⚠️ 存档序列化失败", 2600);
-    }
-    if (serialized.length > 4194304 && "autosave" === reason) return void (this._autosaveDisabled || (this._autosaveDisabled = !0, window.GameEvents.emit('ui:toast', "⚠️ 存档过大：自动保存已停用", 2800)));
-    const compressed = SaveSystem._compress(serialized);
-    try {
-      window.AppServices.get("storage").set(SaveSystem.KEY, compressed);
-      "manual" === reason && window.GameEvents.emit('ui:toast', "💾 已保存");
-      "autosave" === reason && window.GameEvents.emit('ui:toast', "✅ 自动保存", 1100);
-    } catch (e) {
-      if ("autosave" === reason) return void (this._autosaveDisabled || (this._autosaveDisabled = !0, window.GameEvents.emit('ui:toast', "⚠️ 存档失败：空间不足，已停用自动保存", 2600)));
-      window.GameEvents.emit('ui:toast', "⚠️ 存档失败：空间不足", 2600);
-    }
+    const run = async () => {
+      let wres = null;
+      try {
+        wres = window.TU && window.TU.SaveWorker ? await window.TU.SaveWorker.encode(payload) : null;
+      } catch {
+        wres = null;
+      }
+      if (wres && wres.len > 4194304 && "autosave" === reason) return void (this._autosaveDisabled || (this._autosaveDisabled = !0, window.GameEvents.emit('ui:toast', "⚠️ 存档过大：自动保存已停用", 2800)));
+      let compressed = wres && wres.compressed ? wres.compressed : null;
+      if (!compressed) {
+        let serialized;
+        try {
+          serialized = JSON.stringify(payload);
+        } catch (e) {
+          return void window.GameEvents.emit('ui:toast', "⚠️ 存档序列化失败", 2600);
+        }
+        if (serialized.length > 4194304 && "autosave" === reason) return void (this._autosaveDisabled || (this._autosaveDisabled = !0, window.GameEvents.emit('ui:toast', "⚠️ 存档过大：自动保存已停用", 2800)));
+        compressed = SaveSystem._compress(serialized);
+      }
+      try {
+        window.AppServices.get("storage").set(SaveSystem.KEY, compressed);
+        "manual" === reason && window.GameEvents.emit('ui:toast', "💾 已保存");
+        "autosave" === reason && window.GameEvents.emit('ui:toast', "✅ 自动保存", 1100);
+      } catch (e) {
+        if ("autosave" === reason) return void (this._autosaveDisabled || (this._autosaveDisabled = !0, window.GameEvents.emit('ui:toast', "⚠️ 存档失败：空间不足，已停用自动保存", 2600)));
+        window.GameEvents.emit('ui:toast', "⚠️ 存档失败：空间不足", 2600);
+      }
+    };
+    window.TU && window.TU.Safe && "function" == typeof window.TU.Safe.runAsync ? window.TU.Safe.runAsync(run, "save:worker") : run();
   }
   applyToWorld(world, save) {
     if (!world || !save) return;
@@ -10337,6 +10350,66 @@ function readSettingsControls(current) {
     reducedMotion: $("opt-reduce-motion") ? "1" === $("opt-reduce-motion").value : base.reducedMotion
   });
 }
+
+(() => {
+  const TU = window.TU || (window.TU = {});
+  if (TU.SaveWorker) return;
+  const _build = () => `(()=>{function compress(str){if(!str||str.length<100)return str;const result=[];let i=0;for(;i<str.length;){let count=1;for(;i+count<str.length&&str[i]===str[i+count]&&count<127;)count++;count>3?(result.push("\\0"+String.fromCharCode(count)+str[i]),i+=count):(result.push(str[i]),i++)}return"\\x01"+result.join("")}onmessage=(e)=>{const m=e.data;if(!m||m.type!=="encode")return;try{const serialized=JSON.stringify(m.payload);const compressed=compress(serialized);postMessage({type:"done",id:m.id,compressed,len:serialized.length})}catch(err){postMessage({type:"err",id:m.id,message:err&&err.message?err.message:String(err)})}}})();`;
+  TU.SaveWorker = {
+    _worker: null,
+    _seq: 1,
+    _pending: new Map(),
+    ensure() {
+      if (this._worker) return this._worker;
+      if ("undefined" == typeof Worker) return null;
+      const code = _build();
+      const blob = new Blob([code], { type: "text/javascript" });
+      const url = URL.createObjectURL(blob);
+      let w = null;
+      try {
+        w = new Worker(url);
+      } catch {
+        w = null;
+      } finally {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {}
+      }
+      if (!w) return null;
+      w.onmessage = e => {
+        const msg = e.data;
+        if (!msg || !msg.type) return;
+        const slot = this._pending.get(msg.id);
+        if (!slot) return;
+        this._pending.delete(msg.id);
+        "done" === msg.type ? slot.resolve({ compressed: msg.compressed, len: 0 | msg.len }) : slot.reject(new Error(msg.message || "save worker error"));
+      };
+      w.onerror = () => {
+        try {
+          w.terminate();
+        } catch {}
+        this._worker = null;
+        for (const [, slot] of this._pending) slot.reject(new Error("save worker crashed"));
+        this._pending.clear();
+      };
+      return this._worker = w, w;
+    },
+    encode(payload) {
+      const w = this.ensure();
+      if (!w) return Promise.resolve(null);
+      const id = (this._seq++ >>> 0) || 1;
+      return new Promise((resolve, reject) => {
+        this._pending.set(id, { resolve, reject });
+        try {
+          w.postMessage({ type: "encode", id, payload });
+        } catch (e) {
+          this._pending.delete(id);
+          reject(e);
+        }
+      });
+    }
+  };
+})();
 Object.assign(window.TU, {
   SaveSystem: SaveSystem
 });
@@ -19515,12 +19588,72 @@ class Renderer {
         tilesY = ty1 - ty0 + 1 | 0;
       (tilesX > 0 && tilesY > 0 ? tilesX * tilesY : 0) > 576 && (canPatch = !1);
     }
-    if (canPatch) for (let tx = tx0; tx1 >= tx; tx++) for (let ty = ty0; ty1 >= ty; ty++) {
-      const cx = tx / cs | 0,
-        cy = ty / cs | 0,
-        key = this._chunkKey(cx, cy),
-        chunk = this._chunkCache.get(key);
-      chunk && this._updateChunkTile(chunk, world, tx, ty, cx, cy, ts, lut, BL, AIR, texArr, BT);
+    if (canPatch) {
+      const perChunk = new Map();
+      const H = 0 | world.h;
+      const tf = world.tilesFlat;
+      const hasFlat = !!(tf && tf.length === world.area);
+      for (let tx = tx0; tx1 >= tx; tx++) for (let ty = ty0; ty1 >= ty; ty++) {
+        const cx = tx / cs | 0,
+          cy = ty / cs | 0,
+          key = this._chunkKey(cx, cy),
+          chunk = this._chunkCache.get(key);
+        if (!chunk || !chunk.__tu_ctx) continue;
+        const lx = (tx - (cx * cs | 0)) * ts | 0,
+          ly = (ty - (cy * cs | 0)) * ts | 0;
+        let it = perChunk.get(key);
+        if (!it) it = {
+          chunk: chunk,
+          cx: cx,
+          cy: cy,
+          minLX: lx,
+          minLY: ly,
+          maxLX: lx,
+          maxLY: ly,
+          tiles: []
+        }, perChunk.set(key, it);
+        else lx < it.minLX && (it.minLX = lx), ly < it.minLY && (it.minLY = ly), lx > it.maxLX && (it.maxLX = lx), ly > it.maxLY && (it.maxLY = ly);
+        it.tiles.push(0 | tx, 0 | ty);
+      }
+      perChunk.forEach(it => {
+        const cCtx = it.chunk.__tu_ctx;
+        if (!cCtx) return;
+        const prevAlpha = cCtx.globalAlpha,
+          prevComp = cCtx.globalCompositeOperation,
+          prevFill = cCtx.fillStyle;
+        cCtx.globalCompositeOperation = "source-over";
+        cCtx.globalAlpha = 1;
+        cCtx.clearRect(it.minLX, it.minLY, 0 | (it.maxLX - it.minLX + ts), 0 | (it.maxLY - it.minLY + ts));
+        const tiles = it.tiles;
+        for (let i = 0; tiles.length > i; i += 2) {
+          const tx = tiles[i],
+            ty = tiles[i + 1];
+          let block = AIR;
+          if (hasFlat) block = 0 | tf[tx * H + ty | 0];else {
+            const col = world.tiles && world.tiles[tx];
+            block = col && null != col[ty] ? 0 | col[ty] : AIR;
+          }
+          const lx = (tx - (it.cx * cs | 0)) * ts | 0,
+            ly = (ty - (it.cy * cs | 0)) * ts | 0;
+          if (block !== AIR) {
+            const tex = texArr ? texArr[block] : this.textures && this.textures.get ? this.textures.get(block) : null;
+            tex && cCtx.drawImage(tex, 0 | lx, 0 | ly);
+            if (!BT || !BT[block]) {
+              let lv = 0;
+              const lf = world.lightFlat;
+              if (lf && lf.length === world.area) lv = 255 & lf[tx * H + ty | 0];else {
+                const colL = world.light && world.light[tx];
+                lv = colL ? 255 & colL[ty] : 0;
+              }
+              const a = lut[lv];
+              a && (cCtx.globalAlpha = a, cCtx.fillStyle = "#000", cCtx.fillRect(0 | lx, 0 | ly, 0 | ts, 0 | ts), cCtx.globalAlpha = 1);
+            }
+          }
+        }
+        cCtx.globalAlpha = prevAlpha;
+        cCtx.globalCompositeOperation = prevComp;
+        cCtx.fillStyle = prevFill;
+      });
     } else for (let cx = cx0; cx1 >= cx; cx++) for (let cy = cy0; cy1 >= cy; cy++) {
       const key = this._chunkKey(cx, cy),
         old = this._chunkCache.get(key);
@@ -25206,10 +25339,11 @@ class Game {
       playerJerkY = playerAccelY - (camState.lastPlayerAccelY || 0);
     camState.lastPlayerAccelX = playerAccelX;
     camState.lastPlayerAccelY = playerAccelY;
-    camState.jerkHistory[camState.jerkIdx] = {
-      x: playerJerkX,
-      y: playerJerkY
-    };
+    {
+      const p = camState.jerkHistory[camState.jerkIdx];
+      p.x = playerJerkX;
+      p.y = playerJerkY;
+    }
     camState.jerkIdx = (camState.jerkIdx + 1) % 3;
     let avgJerkX = 0,
       avgJerkY = 0;
@@ -25220,20 +25354,22 @@ class Game {
     camState.lastPlayerVelY = player.vy;
     camState.smoothAccel.x = .8 * camState.smoothAccel.x + .2 * playerAccelX;
     camState.smoothAccel.y = .8 * camState.smoothAccel.y + .2 * playerAccelY;
-    camState.accelHistory[camState.accelHistoryIdx] = {
-      x: playerAccelX,
-      y: playerAccelY
-    };
+    {
+      const p = camState.accelHistory[camState.accelHistoryIdx];
+      p.x = playerAccelX;
+      p.y = playerAccelY;
+    }
     camState.accelHistoryIdx = (camState.accelHistoryIdx + 1) % 4;
     let avgAccelX = 0,
       avgAccelY = 0;
     for (let i = 0; 4 > i; i++) avgAccelX += camState.accelHistory[i].x, avgAccelY += camState.accelHistory[i].y;
     avgAccelX /= 4;
     avgAccelY /= 4;
-    camState.velHistory[camState.velHistoryIdx] = {
-      x: player.vx,
-      y: player.vy
-    };
+    {
+      const p = camState.velHistory[camState.velHistoryIdx];
+      p.x = player.vx;
+      p.y = player.vy;
+    }
     camState.velHistoryIdx = (camState.velHistoryIdx + 1) % 8;
     let avgVx = 0,
       avgVy = 0;
@@ -32934,6 +33070,7 @@ window.addEventListener("load", () => {
         this.connected = !1;
         this._syncInterval = null;
         this._remotePlayers = new Map();
+        this._losCache = new Map();
         this._colorIdx = 0;
         this._pendingPc = null;
         this._stateInterval = null;
@@ -33390,6 +33527,70 @@ window.addEventListener("load", () => {
           best > d2 && (best = d2);
         }
         return best === 1 / 0 ? 1 / 0 : (window.TU && window.TU.Utils && window.TU.Utils.fastSqrt || Math.sqrt)(best);
+      }
+      _hasLOSWorld(ax, ay, bx, by) {
+        const world = window.AppServices.get("world");
+        if (!world) return !0;
+        const w = 0 | world.w,
+          h = 0 | world.h;
+        if (!(w > 0 && h > 0)) return !0;
+        const tsInv = CONFIG && CONFIG.TILE_SIZE_INV ? CONFIG.TILE_SIZE_INV : .0625;
+        let x0 = ax * tsInv | 0,
+          y0 = ay * tsInv | 0,
+          x1 = bx * tsInv | 0,
+          y1 = by * tsInv | 0;
+        if (x0 < 0 || y0 < 0 || x1 < 0 || y1 < 0 || x0 >= w || x1 >= w || y0 >= h || y1 >= h) return !0;
+        const tilesFlat = world.tilesFlat,
+          hasFlat = !!(tilesFlat && tilesFlat.length === (0 | world.area)),
+          AIR = BLOCK && null != BLOCK.AIR ? 0 | BLOCK.AIR : 0;
+        const solid = (tx, ty) => {
+          let id = AIR;
+          if (hasFlat) id = 0 | tilesFlat[tx * h + ty | 0];else {
+            const col = world.tiles && world.tiles[tx];
+            id = col && null != col[ty] ? 0 | col[ty] : AIR;
+          }
+          if (id === AIR) return !1;
+          return "undefined" != typeof BLOCK_SOLID && BLOCK_SOLID ? !!BLOCK_SOLID[id & 255] : !!(BLOCK_DATA && BLOCK_DATA[id] && BLOCK_DATA[id].solid);
+        };
+        let dx = x1 - x0;
+        dx = dx < 0 ? -dx : dx;
+        let sx = x0 < x1 ? 1 : -1;
+        let dy = y1 - y0;
+        dy = dy < 0 ? -dy : dy;
+        let sy = y0 < y1 ? 1 : -1;
+        dy = -dy;
+        let err = dx + dy;
+        const sx0 = x0,
+          sy0 = y0;
+        for (;;) {
+          if (!(x0 === sx0 && y0 === sy0) && !(x0 === x1 && y0 === y1) && solid(x0, y0)) return !1;
+          if (x0 === x1 && y0 === y1) break;
+          const e2 = 2 * err;
+          e2 >= dy && (err += dy, x0 += sx);
+          e2 <= dx && (err += dx, y0 += sy);
+        }
+        return !0;
+      }
+      _isNearestPeerLOSBlocked(px, py, nowMs) {
+        if (0 >= this._remotePlayers.size) return !1;
+        let bestId = null,
+          bestD2 = 1 / 0,
+          bx = 0,
+          by = 0;
+        for (const [id, rp] of this._remotePlayers) {
+          if (!Number.isFinite(rp.x) || !Number.isFinite(rp.y)) continue;
+          const dx = rp.x - px,
+            dy = rp.y - py,
+            d2 = dx * dx + dy * dy;
+          d2 < bestD2 && (bestD2 = d2, bestId = id, bx = rp.x, by = rp.y);
+        }
+        if (!bestId) return !1;
+        const rec = this._losCache.get(bestId);
+        if (rec && nowMs - rec.at < 250) return rec.blocked;
+        const blocked = !this._hasLOSWorld(px, py, bx, by);
+        this._losCache.set(bestId, { at: nowMs, blocked: blocked });
+        this._losCache.size > 16 && this._losCache.delete(this._losCache.keys().next().value);
+        return blocked;
       }
       _shouldSendEvent(type, x, y) {
         if (0 >= this._remotePlayers.size) return !0;
@@ -35268,6 +35469,7 @@ window.addEventListener("load", () => {
             aoiVeryFar = !Number.isFinite(peerDist) || peerDist >= 2200;
           let nextMs = this._computeSyncInterval(moved);
           aoiNear ? nextMs = Math.max(32, Math.min(nextMs, moved ? 38 : 62)) : aoiMid ? nextMs = Math.max(40, Math.min(nextMs, moved ? 58 : 95)) : aoiFar ? nextMs = Math.max(nextMs, moved ? 96 : 180) : aoiVeryFar && (nextMs = Math.max(nextMs, moved ? 128 : 260));
+          this._isNearestPeerLOSBlocked && this._isNearestPeerLOSBlocked(px, py, performance.now()) && (nextMs = Math.max(nextMs, moved ? 200 : 333));
           let lossAvg = 0,
             jitAvg = 0,
             pc = 0;
