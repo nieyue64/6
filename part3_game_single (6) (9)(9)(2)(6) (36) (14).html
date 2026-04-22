@@ -3810,6 +3810,14 @@ body {
 (function() {
   'use strict';
   const TU = window.TU || (window.TU = {});
+
+  const _safeExecute = (fn, context) => {
+    try {
+      fn();
+    } catch (e) {
+      console.warn(`[${context}]`, e);
+    }
+  };
   
   /* --- AnimFrame: Batched requestAnimationFrame --- */
   TU.AnimFrame = {
@@ -3851,10 +3859,8 @@ body {
           return;
         }
         for (let i = 0; i < this._queue.length; i++) {
-          try {
-            const item = this._queue[i];
-            if (item) item.fn(ts);
-          } catch (e) { console.warn('[AnimFrame]', e); }
+          const item = this._queue[i];
+          if (item) _safeExecute(() => item.fn(ts), 'AnimFrame');
         }
         requestAnimationFrame(tick);
       };
@@ -3908,8 +3914,8 @@ body {
         this._reads = [];
         this._writes = [];
         this._scheduled = false;
-        for (const fn of reads) try { fn(); } catch (e) { console.warn('[DOMBatch.read]', e); }
-        for (const fn of writes) try { fn(); } catch (e) { console.warn('[DOMBatch.write]', e); }
+        for (const fn of reads) _safeExecute(fn, 'DOMBatch.read');
+        for (const fn of writes) _safeExecute(fn, 'DOMBatch.write');
       });
     },
     clear() { this._reads = []; this._writes = []; this._scheduled = false; }
@@ -11977,14 +11983,6 @@ class NoiseGenerator {
    * @returns {number} Noise value in range [-1, 1]
    */
   noise2D(x, y) {
-    // OPTIMIZED: Cache lookup for integer coordinates (most common during terrain gen)
-    const xi = 0 | x,
-      yi = 0 | y;
-    if (x === xi && y === yi) {
-      const key = xi << 16 | 65535 & yi,
-        cached = this._noiseCache.get(key);
-      if (void 0 !== cached) return cached;
-    }
     const X = 255 & x,
       Y = 255 & y;
     x -= 0 | x;
@@ -12005,11 +12003,6 @@ class NoiseGenerator {
       g01 = this._grad(AB, x, y1),
       lerpX0 = g00 + u * (g10 - g00),
       result = lerpX0 + v * (g01 + u * (this._grad(BB, x1, y1) - g01) - lerpX0);
-    // Cache result for integer coordinates
-    if (x === xi && y === yi && this._noiseCache.size < this._noiseCacheMaxSize) {
-      const key = xi << 16 | 65535 & yi;
-      this._noiseCache.set(key, result);
-    }
     return result;
   }
   /**
@@ -15075,7 +15068,7 @@ class ParticleSystem {
           s = size[i] * lifeVal;
         if (.5 > s) continue;
         const hasGlow = glowArr[i];
-        hasGlow && (lastShadowColor !== color && (ctx.shadowColor = color, lastShadowColor = color), 10 !== lastShadowBlur && (ctx.shadowBlur = 10, lastShadowBlur = 10));
+        hasGlow && (lastShadowColor !== "lighter" && (ctx.globalCompositeOperation = "lighter", lastShadowColor = "lighter"));
         const alpha = .8 * lifeVal;
         Math.abs(alpha - lastAlpha) > .01 && (ctx.globalAlpha = alpha, lastAlpha = alpha);
         const rot = rotation[i],
@@ -15093,7 +15086,7 @@ class ParticleSystem {
           ctx.setTransform(cos * dpr, sin * dpr, -sin * dpr, cos * dpr, px * dpr, py * dpr);
           ctx.fillRect(0 | -hs, 0 | -hs, 0 | s, 0 | s);
         }
-        hasGlow && (ctx.shadowBlur = 0, lastShadowBlur = 0);
+        hasGlow && (ctx.globalCompositeOperation = "source-over", lastShadowColor = "source-over");
       }
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -15153,6 +15146,8 @@ class DroppedItem {
     this._pickupScale = 1;
     this._shCx = 0;
     this._shCy = 0;
+    this._sleep = !1;
+    this._sleepTimer = 0;
   }
   reset(x, y, blockId, count = 1, pickupDelay = 5e3) {
     return this.x = x, this.y = y, this.vx = 4 * (__TU_RAND_LUT[16383 & __tu_rand_idx++] - .5), this.vy = -3 - 2 * __TU_RAND_LUT[16383 & __tu_rand_idx++], this.blockId = blockId, this.count = count, this.age = 0, this.bobOffset = 6.283185307179586 * __TU_RAND_LUT[16383 & __tu_rand_idx++], this.rotation = 0, this.grounded = !1, this.pickupDelay = pickupDelay, this._pickup = null, this._pickupAlpha = 1, this._pickupScale = 1, this._shCx = 0, this._shCy = 0, this._sleep = !1, this._sleepTimer = 0, this
@@ -15906,6 +15901,10 @@ class Player {
     this._jumpHeld = !1;
     this._coyoteMs = 0;
     this._jumpBufferMs = 0;
+    this.input = null;
+    this._visualYOffset = 0;
+    this._hurtKind = null;
+    this._hurtFlashMs = 0;
   }
   static _initSpriteCache() {
     const colors = {
@@ -16792,7 +16791,14 @@ class TouchController {
     }
     this.joystick.dx = nx;
     this.joystick.dy = ny;
-    thumbEl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    this._joyDX = dx;
+    this._joyDY = dy;
+    if (!this._joyRAF) {
+      this._joyRAF = requestAnimationFrame(() => {
+        thumbEl.style.transform = `translate(calc(-50% + ${this._joyDX}px), calc(-50% + ${this._joyDY}px))`;
+        this._joyRAF = null;
+      });
+    }
   }
   _updateCrosshair(clientX, clientY, el) {
     try {
@@ -16808,7 +16814,14 @@ class TouchController {
       this.crosshair.x = clientX;
       this.crosshair.y = clientY;
     }
-    el.style.transform = `translate3d(${clientX - 20}px, ${clientY - 20}px, 0)`;
+    this._crosshairX = clientX;
+    this._crosshairY = clientY;
+    if (!this._crosshairRAF) {
+      this._crosshairRAF = requestAnimationFrame(() => {
+        el.style.transform = `translate3d(${this._crosshairX - 20}px, ${this._crosshairY - 20}px, 0)`;
+        this._crosshairRAF = null;
+      });
+    }
   }
   _setupButton(id, action) {
     const btn = document.getElementById(id);
@@ -21327,7 +21340,14 @@ class Renderer {
       if (pending && pending.length) {
         for (let i = 0; i < pending.length; i++) {
           const s = pending[i];
-          if (!this._postFxPipeline.some(e => e.name === s.name)) {
+          let found = false;
+          for (let j = 0; j < this._postFxPipeline.length; j++) {
+            if (this._postFxPipeline[j].name === s.name) {
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
             this._postFxPipeline.push(s);
           }
         }
@@ -21337,7 +21357,18 @@ class Renderer {
     }
     if (!this._postFxPipeline.length) return;
     if (!this._postFxPipelineSorted) {
-      this._postFxPipeline.sort((a, b) => a.order - b.order);
+      let swapped = true;
+      while (swapped) {
+        swapped = false;
+        for (let i = 0; i < this._postFxPipeline.length - 1; i++) {
+          if (this._postFxPipeline[i].order > this._postFxPipeline[i + 1].order) {
+            let temp = this._postFxPipeline[i];
+            this._postFxPipeline[i] = this._postFxPipeline[i + 1];
+            this._postFxPipeline[i + 1] = temp;
+            swapped = true;
+          }
+        }
+      }
       this._postFxPipelineSorted = true;
     }
     const ctx = this.ctx;
@@ -26576,15 +26607,29 @@ window.TU;
         dist > maxDist && (dx = dx / dist * maxDist, dy = dy / dist * maxDist);
         this.joystick.dx = dx / maxDist;
         this.joystick.dy = dy / maxDist;
-        thumbEl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+        this._joyDX = dx;
+        this._joyDY = dy;
+        if (!this._joyRAF) {
+          this._joyRAF = requestAnimationFrame(() => {
+            thumbEl.style.transform = `translate(calc(-50% + ${this._joyDX}px), calc(-50% + ${this._joyDY}px))`;
+            this._joyRAF = null;
+          });
+        }
       },
       // Crosshair: coordinate update only (compatible with original logic)
       TouchController.prototype._updateCrosshair = function (x, y, el) {
         this.crosshair.x = x;
         this.crosshair.y = y;
+        this._crosshairX = x;
+        this._crosshairY = y;
         // Center 40x40 crosshair element on touch point
-        el.style.left = x - 20 + "px";
-        el.style.top = y - 20 + "px";
+        if (!this._crosshairRAF) {
+          this._crosshairRAF = requestAnimationFrame(() => {
+            el.style.left = this._crosshairX - 20 + "px";
+            el.style.top = this._crosshairY - 20 + "px";
+            this._crosshairRAF = null;
+          });
+        }
       }), Renderer && Renderer.prototype) {
         const origResize = Renderer.prototype.resize;
         Renderer.prototype.resize = function () {
@@ -30233,8 +30278,18 @@ window.TU;
                 platesSet && platesSet.has(key) && next.add(key);
               };
             markPlateUnder(window.AppServices.get("player"));
-            const ents = game.entities || game.mobs || game.enemies;
-            if (Array.isArray(ents)) for (let i = 0, len = ents.length; len > i; i++) markPlateUnder(ents[i]);
+            if (game.spatialHash) {
+              const q = game._plateQ || (game._plateQ = []);
+              for (const key of platesSet) {
+                const tx = key >>> 16 & 65535,
+                  ty = 65535 & key;
+                game.spatialHash.queryRect(tx * ts, ty * ts, ts, ts, q);
+                for (let i = 0, len = q.length; len > i; i++) markPlateUnder(q[i]);
+              }
+            } else {
+              const ents = game.entities || game.mobs || game.enemies;
+              if (Array.isArray(ents)) for (let i = 0, len = ents.length; len > i; i++) markPlateUnder(ents[i]);
+            }
             for (const k of next) {
               if (pressed.has(k)) continue;
               pressed.add(k);
