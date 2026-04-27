@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>极简五子棋</title>
+    <style>
+        :root {
+            --bg-color: #1a1e23;
+            --board-color-1: #e3b365;
+            --board-color-2: #c89b4f;
+            --line-color: #2c1e0f;
+            --text-color: #ecf0f1;
+            --accent-color: #3498db;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            background-image: radial-gradient(circle at center, #2a3139 0%, #1a1e23 100%);
+            color: var(--text-color);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            user-select: none;
+            overflow: hidden;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .header h1 {
+            margin: 0 0 12px 0;
+            font-weight: 400;
+            letter-spacing: 4px;
+            font-size: 2rem;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .status {
+            font-size: 1.1rem;
+            padding: 8px 24px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 30px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+        }
+
+        .status-dot.black { background: #222; box-shadow: inset -2px -2px 4px rgba(0,0,0,0.5); }
+        .status-dot.white { background: #eee; box-shadow: inset -2px -2px 4px rgba(0,0,0,0.2); }
+
+        .board-wrapper {
+            position: relative;
+            padding: 2vmin;
+            background: 
+                repeating-linear-gradient(45deg, rgba(0,0,0,0.03) 0px, rgba(0,0,0,0.03) 1px, transparent 1px, transparent 4px),
+                linear-gradient(135deg, var(--board-color-1), var(--board-color-2));
+            border-radius: 6px;
+            box-shadow: 
+                0 20px 50px rgba(0,0,0,0.6), 
+                inset 0 0 20px rgba(0,0,0,0.1),
+                inset 0 2px 3px rgba(255,255,255,0.3),
+                0 0 0 2px #8b5a2b;
+        }
+
+        .board {
+            display: grid;
+            grid-template-columns: repeat(15, 1fr);
+            grid-template-rows: repeat(15, 1fr);
+            width: 86vmin;
+            max-width: 560px;
+            height: 86vmin;
+            max-height: 560px;
+        }
+
+        .cell {
+            position: relative;
+            cursor: pointer;
+        }
+
+        .cell.has-stone {
+            cursor: default;
+        }
+
+        /* 棋盘网格线 */
+        .line-h, .line-v {
+            position: absolute;
+            background-color: var(--line-color);
+            z-index: 1;
+            opacity: 0.7;
+        }
+        .line-h { top: 50%; left: 0; right: 0; height: 1px; transform: translateY(-50%); }
+        .line-v { top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-50%); }
+        
+        /* 边缘线修正 */
+        .cell[data-row="0"] .line-v { top: 50%; }
+        .cell[data-row="14"] .line-v { bottom: 50%; }
+        .cell[data-col="0"] .line-h { left: 50%; }
+        .cell[data-col="14"] .line-h { right: 50%; }
+
+        /* 星位 */
+        .star {
+            position: absolute;
+            width: 22%;
+            height: 22%;
+            background-color: var(--line-color);
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 2;
+            opacity: 0.8;
+        }
+
+        /* 棋子 */
+        .stone {
+            position: absolute;
+            width: 90%;
+            height: 90%;
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 2px 4px 6px rgba(0,0,0,0.4);
+            z-index: 3;
+            animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .stone.black {
+            background: radial-gradient(circle at 35% 35%, #666 0%, #222 30%, #080808 80%, #111 100%);
+        }
+        .stone.white {
+            background: radial-gradient(circle at 35% 35%, #fff 0%, #f4f4f4 30%, #d4d4d4 80%, #e0e0e0 100%);
+        }
+
+        /* 落子预览 */
+        .preview {
+            position: absolute;
+            width: 90%;
+            height: 90%;
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 3;
+            opacity: 0;
+            transition: opacity 0.2s;
+            pointer-events: none;
+        }
+        @media (hover: hover) {
+            .board[data-turn="1"] .cell:not(.has-stone):hover .preview {
+                background: radial-gradient(circle at 35% 35%, #666 0%, #222 30%, #080808 80%, #111 100%);
+                opacity: 0.5;
+            }
+            .board[data-turn="2"] .cell:not(.has-stone):hover .preview {
+                background: radial-gradient(circle at 35% 35%, #fff 0%, #f4f4f4 30%, #d4d4d4 80%, #e0e0e0 100%);
+                opacity: 0.5;
+            }
+        }
+
+        /* 获胜高亮 */
+        .stone.win-highlight {
+            box-shadow: 0 0 12px 4px rgba(255, 215, 0, 0.8), 2px 4px 6px rgba(0,0,0,0.4);
+            animation: pulseWin 1.5s infinite;
+            z-index: 4;
+        }
+
+        .controls {
+            margin-top: 32px;
+        }
+        
+        .btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 10px 28px;
+            font-size: 1rem;
+            border-radius: 24px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            outline: none;
+            backdrop-filter: blur(4px);
+            letter-spacing: 1px;
+        }
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        .btn:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+
+        /* 模态框 */
+        .modal-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.4);
+            backdrop-filter: blur(3px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+            border-radius: 6px;
+        }
+        .modal-overlay.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .modal-content {
+            background: var(--bg-color);
+            padding: 36px 48px;
+            border-radius: 16px;
+            text-align: center;
+            box-shadow: 0 15px 40px rgba(0,0,0,0.6);
+            transform: scale(0.9);
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        .modal-overlay.show .modal-content {
+            transform: scale(1);
+        }
+        .modal-title {
+            font-size: 1.8rem;
+            margin: 0 0 24px 0;
+            font-weight: 300;
+            letter-spacing: 2px;
+        }
+        .modal-title span {
+            font-weight: 600;
+        }
+
+        @keyframes popIn {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+            70% { transform: translate(-50%, -50%) scale(1.1); }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        }
+        @keyframes pulseWin {
+            0% { box-shadow: 0 0 12px 4px rgba(255, 215, 0, 0.5), 2px 4px 6px rgba(0,0,0,0.4); }
+            50% { box-shadow: 0 0 20px 8px rgba(255, 215, 0, 0.9), 2px 4px 6px rgba(0,0,0,0.4); }
+            100% { box-shadow: 0 0 12px 4px rgba(255, 215, 0, 0.5), 2px 4px 6px rgba(0,0,0,0.4); }
+        }
+        
+        /* 移动端优化 */
+        @media (max-width: 600px) {
+            .header h1 { font-size: 1.5rem; }
+            .status { font-size: 1rem; padding: 6px 18px; }
+            .board-wrapper { padding: 2.5vmin; }
+            .controls { margin-top: 24px; }
+            .modal-content { padding: 24px 32px; }
+            .modal-title { font-size: 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>极简五子棋</h1>
+        <div class="status" id="statusPanel">
+            <div class="status-dot black" id="statusDot"></div>
+            <span id="statusText">黑方落子</span>
+        </div>
+    </div>
+    
+    <div class="board-wrapper">
+        <div class="board" id="board" data-turn="1"></div>
+        <div class="modal-overlay" id="modal">
+            <div class="modal-content">
+                <h2 class="modal-title" id="modalTitle"><span>黑方</span> 获胜！</h2>
+                <button class="btn" id="modalRestartBtn">再来一局</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button class="btn" id="restartBtn">重新开始游戏</button>
+    </div>
+
+    <script>
+        const SIZE = 15;
+        let board = [];
+        let currentPlayer = 1; // 1: 黑子, 2: 白子
+        let isGameOver = false;
+
+        const boardEl = document.getElementById('board');
+        const statusPanel = document.getElementById('statusPanel');
+        const statusText = document.getElementById('statusText');
+        const statusDot = document.getElementById('statusDot');
+        const restartBtn = document.getElementById('restartBtn');
+        const modal = document.getElementById('modal');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalRestartBtn = document.getElementById('modalRestartBtn');
+
+        // 标准 15x15 棋盘的五个星位
+        const starPoints = [
+            [3, 3], [11, 3], [7, 7], [3, 11], [11, 11]
+        ];
+
+        function initGame() {
+            board = Array(SIZE).fill(0).map(() => Array(SIZE).fill(0));
+            currentPlayer = 1;
+            isGameOver = false;
+            boardEl.dataset.turn = currentPlayer;
+            updateStatus();
+            renderBoard();
+            modal.classList.remove('show');
+        }
+
+        function renderBoard() {
+            boardEl.innerHTML = '';
+            for (let row = 0; row < SIZE; row++) {
+                for (let col = 0; col < SIZE; col++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.dataset.row = row;
+                    cell.dataset.col = col;
+                    
+                    // 绘制十字线
+                    const lineH = document.createElement('div');
+                    lineH.className = 'line-h';
+                    const lineV = document.createElement('div');
+                    lineV.className = 'line-v';
+                    cell.appendChild(lineH);
+                    cell.appendChild(lineV);
+
+                    // 绘制星位
+                    if (starPoints.some(p => p[0] === row && p[1] === col)) {
+                        const star = document.createElement('div');
+                        star.className = 'star';
+                        cell.appendChild(star);
+                    }
+
+                    // 预留悬停预览的 DOM
+                    const preview = document.createElement('div');
+                    preview.className = 'preview';
+                    cell.appendChild(preview);
+
+                    // 点击落子事件
+                    cell.addEventListener('click', () => handleCellClick(row, col, cell));
+                    boardEl.appendChild(cell);
+                }
+            }
+        }
+
+        function handleCellClick(row, col, cellEl) {
+            if (isGameOver || board[row][col] !== 0) return;
+
+            // 记录落子
+            board[row][col] = currentPlayer;
+            cellEl.classList.add('has-stone');
+            
+            // 渲染实体棋子
+            const stone = document.createElement('div');
+            stone.className = `stone ${currentPlayer === 1 ? 'black' : 'white'}`;
+            cellEl.appendChild(stone);
+
+            // 胜负判定
+            const winPath = checkWin(row, col, currentPlayer);
+            if (winPath) {
+                isGameOver = true;
+                boardEl.dataset.turn = 0; // 取消 hover 预览
+                highlightWinPath(winPath);
+                showModal(`${currentPlayer === 1 ? '黑方' : '白方'}`);
+                return;
+            }
+
+            // 平局判定
+            if (checkDraw()) {
+                isGameOver = true;
+                boardEl.dataset.turn = 0;
+                showModal('平局');
+                return;
+            }
+
+            // 切换回合
+            currentPlayer = currentPlayer === 1 ? 2 : 1;
+            boardEl.dataset.turn = currentPlayer;
+            updateStatus();
+        }
+
+        // 判断是否五子连珠
+        function checkWin(row, col, player) {
+            const dirs = [
+                [[0, 1], [0, -1]],   // 水平
+                [[1, 0], [-1, 0]],   // 垂直
+                [[1, 1], [-1, -1]],  // 主对角线 \
+                [[1, -1], [-1, 1]]   // 副对角线 /
+            ];
+
+            for (let dir of dirs) {
+                let count = 1;
+                let path = [[row, col]];
+                
+                for (let d of dir) {
+                    let r = row + d[0];
+                    let c = col + d[1];
+                    while (r >= 0 && r < SIZE && c >= 0 && c < SIZE && board[r][c] === player) {
+                        count++;
+                        path.push([r, c]);
+                        r += d[0];
+                        c += d[1];
+                    }
+                }
+                if (count >= 5) return path;
+            }
+            return null;
+        }
+
+        function checkDraw() {
+            for (let r = 0; r < SIZE; r++) {
+                for (let c = 0; c < SIZE; c++) {
+                    if (board[r][c] === 0) return false;
+                }
+            }
+            return true;
+        }
+
+        function highlightWinPath(path) {
+            path.forEach(([r, c]) => {
+                const cell = boardEl.children[r * SIZE + c];
+                const stone = cell.querySelector('.stone');
+                if (stone) {
+                    stone.classList.add('win-highlight');
+                }
+            });
+        }
+
+        function updateStatus() {
+            const isBlack = currentPlayer === 1;
+            statusText.textContent = `${isBlack ? '黑方' : '白方'}落子`;
+            statusDot.className = `status-dot ${isBlack ? 'black' : 'white'}`;
+        }
+
+        function showModal(winnerStr) {
+            setTimeout(() => {
+                if (winnerStr === '平局') {
+                    modalTitle.innerHTML = `平局！`;
+                } else {
+                    modalTitle.innerHTML = `<span>${winnerStr}</span> 获胜！`;
+                }
+                modal.classList.add('show');
+            }, 600); // 延迟弹窗，让玩家看完最后一手落子和动画
+        }
+
+        restartBtn.addEventListener('click', initGame);
+        modalRestartBtn.addEventListener('click', initGame);
+
+        // 启动游戏
+        initGame();
+    </script>
+</body>
+</html>
